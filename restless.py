@@ -3,7 +3,7 @@
 import flask
 import flask.ext.sqlalchemy
 import flask.ext.restless
-from flask.ext.cors import cross_origin
+from flask.ext.cors import CORS
 import os
 import sys
 
@@ -41,8 +41,7 @@ manager = flask.ext.restless.APIManager(app, flask_sqlalchemy_db=db)
 # default. Allowed HTTP methods can be specified as well.
 for dbn in database.dbs:
 	print "exporting", dbn
-	blueprint = manager.create_api(dbn, methods=['GET'], allow_functions=True)
-	blueprint.after_request(add_cors_headers)
+	manager.create_api(dbn, methods=['GET'], allow_functions=True)
 
 # start the flask loop
 app.run(host='0.0.0.0', debug=True, port=5000)
