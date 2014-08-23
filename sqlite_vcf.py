@@ -8,7 +8,7 @@ from itertools import izip
 #import urllib
 import argparse
 import time
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 #from pymongo       import MongoClient
 #from pymongo       import ASCENDING, DESCENDING
 #from pymongo       import errors
@@ -32,7 +32,7 @@ sql_echo        = False
 #./mongo_vcf.py db_del -s localhost -p 27017 -d vcf -y; ./mongo_vcf.py db_add -s localhost -p 27017 -d vcf ; ./mongo_vcf.py file_add -s localhost -p 27017 -d vcf RF_001_SZAXPI008746-45.vcf.gz.snpeff.vcf
 #./mongo_vcf.py db_del -s localhost -p 27017 -d vcf -y; ./mongo_vcf.py db_add -s localhost -p 27017 -d vcf ; find data/ -name '*.vcf' | sort | xargs -P2 -n1 ./mongo_vcf.py file_add -s localhost -p 27017 -d vcf
 
-
+coord_num = 0
 
 def main(args):
     print args
@@ -44,9 +44,12 @@ def main(args):
     indexes        = db.list_indexes( table_name='coords' )
     db.drop_indexes(table_name='coords')
 
+    metadata = defaultdict(dict)
     print infiles
     for infile in infiles:
-        process_file( db, infile )
+        process_file( db, infile, metadata )
+
+    process_metadata( db, metadata )
 
     print "adding indexes"
     db.add_indexes(indexes, 'coords')
@@ -75,6 +78,42 @@ def diffTime( runid, chrom, startTime, startTimeChrom, startTimeLap, regs, regsC
                                                                                 runid, diffRegsStart, chrom, diffRegsChrom, diffRegsLap,
                                                                                 runid, speedStart   , chrom, speedChrom   , speedLap )
     #sys.stdout.flush()
+
+
+def process_metadata( db, metadata ):
+    execute         = db.engine.execute
+
+    tables = (
+        ( 'chromposes', 'chromposes_ID' , ChromPos   ),
+        ( 'formats'   , 'format_ID'     , Format_col ),
+        ( 'refs'      , 'ref_ID'        , Refs       ),
+        ( 'alts'      , 'alt_ID'        , Alts       ),
+        ( 'types'     , 'var_type_ID'   , VarType    ),
+        ( 'subtypes'  , 'var_subtype_ID', VarSubType )
+    )
+
+    for table_name, key_id_name, table in tables:
+        data      = metadata[ table_name ]
+        #print "TABLE NAME", table_name, "KEY ID NAME", key_id_name, "LEN", len(data), data
+        ins       = table.__table__.insert()
+        registers = [None] * len(data)
+        reg_count = 0
+
+        for val_tuple in data:
+            #print "  REG", reg_count
+            #print "    VAL TUPLE", val_tuple
+            val_dict   = dict( (x, y) for x, y in val_tuple )
+            #print "    VAL DICT ", val_dict
+            data_num = data[ val_tuple ]
+            #print "    DATA NUM ", data_num
+            val_dict[ key_id_name ] = data_num
+            #print "    VAL DICT ", val_dict
+            registers[ reg_count  ] = val_dict
+            reg_count += 1
+
+        print "INSERTING", table_name
+        execute( ins, registers )
+        print "INSERTED", table_name
 
 
 def add_header(session, vcf_reader, fileReg):
@@ -233,22 +272,37 @@ def add_header(session, vcf_reader, fileReg):
     session.flush()
 
 
-def process_file( db, infile ):
+def process_file( db, infile, metadata ):
     print "processing", infile
 
     colnames        = ('CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT' )
 
-    #printevery      =  6400
-    #dumpevery       =  6400
-    #debug           = 12800 # -1 no; > 1 = delete database, number of samples to read
+    printevery      =  6400
+    dumpevery       =  6400
+    debug           = dumpevery * 6 # -1 no; > 1 = delete database, number of samples to read
 
     #printevery      =  5
     #dumpevery       =  5
-    #debug           = 10 # -1 no; > 1 = delete database, number of samples to read
+    #debug           = dumpevery * 6 # -1 no; > 1 = delete database, number of samples to read
 
-    printevery      =  6400
-    dumpevery       =  6400
-    debug           =    -1 # -1 no; > 1 = delete database, number of samples to read
+    #printevery      = 19200
+    #dumpevery       =  6400
+    #debug           =    -1 # -1 no; > 1 = delete database, number of samples to read
+
+
+    def parseval( val ):
+        if repr(type(val)) == "<type 'list'>":
+            res = []
+            for e in val:
+                #print e, type(e)
+                res.append( str(e) )
+            return res
+        else:
+            return val
+
+
+    global coord_num
+
 
     infile_abs_path = os.path.abspath(  infile )
     infile_basename = os.path.basename( infile )
@@ -262,7 +316,7 @@ def process_file( db, infile ):
     session.commit()
     session.flush()
 
-    add_header( session, vcf_reader, fileReg )
+    #add_header( session, vcf_reader, fileReg )
 
     samples_names   = getattr(vcf_reader, 'samples', [])
 
@@ -279,20 +333,26 @@ def process_file( db, infile ):
     startTimeLap    = startTime
     records         = [None] * dumpevery
     chrom_ID        = -1
-    formats         = {}
-    refs            = {}
-    alts            = {}
-    types           = {}
-    subtypes        = {}
+    chromposes      = metadata['chromposes']
+    formats         = metadata['formats'   ]
+    refs            = metadata['refs'      ]
+    alts            = metadata['alts'      ]
+    types           = metadata['types'     ]
+    subtypes        = metadata['subtypes'  ]
     get_or_update   = db.get_or_update
     execute         = db.engine.execute
+    ins             = Coords.__table__.insert()
+
 
     for record in vcf_reader:
         #print pp.pprint( record )
-
+        coord_num += 1
         regs      += 1
         regsChrom += 1
         regsLap   += 1
+
+        if regs == debug:
+            break
 
         rec = {}
         for k in colnames:
@@ -305,11 +365,14 @@ def process_file( db, infile ):
 
 
 
+
         #fix SNPeff
         if 'INFO' in rec and 'EFF' in rec['INFO']:
             #print "INFO EFF B", rec['INFO']['EFF']
             rec['INFO']['EFF'] = [ x.replace(')', '').replace('(', '|').strip().split( '|' ) for x in rec['INFO']['EFF'] ]
             #print "INFO EFF A", rec['INFO']['EFF']
+
+
 
 
         if lastChrom != chrom:
@@ -321,60 +384,96 @@ def process_file( db, infile ):
             regsChrom      = 0
             regsLap        = 0
 
-            db_chrom       = get_or_update( Chroms    , 'chrom_name', chrom         )
+            db_chrom       = get_or_update( Chroms    , { 'chrom_name': chrom } )
             chrom_ID       = db_chrom.chrom_ID
 
-            print "\n", infile, chrom, chrom_ID, db_chrom
+            print infile, chrom, chrom_ID, db_chrom, "\n\n"
 
         #pp(rec)
 
-        format_ID = formats.get(rec['FORMAT'], -1)
+
+
+        alt_str        = ','.join(rec['ALT'   ])
+
+        chrompos_k     = ( ('chrom_ID'       , chrom_ID          ), ('Pos', pos) )
+        format_k       = ( ('format_str'     , rec['FORMAT']     ), )
+        ref_k          = ( ('ref_str'        , rec['REF']        ), )
+        alt_k          = ( ('alt_str'        , alt_str           ), )
+        var_type_k     = ( ('var_type_str'   , record.var_type   ), )
+        var_subtype_k  = ( ('var_subtype_str', record.var_subtype), )
+
+        chrompos_ID    = chromposes.get( chrompos_k   , -1 )
+        format_ID      = formats.get(    format_k     , -1 )
+        ref_ID         = refs.get(       ref_k        , -1 )
+        alt_ID         = alts.get(       alt_k        , -1 )
+        var_type_ID    = types.get(      var_type_k   , -1 )
+        var_subtype_ID = subtypes.get(   var_subtype_k, -1 )
+
+
+        if chrompos_ID == -1:
+            chrompos_ID              = len( chromposes )
+            chromposes[ chrompos_k ] = chrompos_ID
+
         if format_ID == -1:
-            db_fmt    = get_or_update( Format_col, 'format_str', rec['FORMAT'] )
-            format_ID = db_fmt.format_ID
-            formats[ rec['FORMAT'] ] = format_ID
+            format_ID           = len( formats )
+            formats[ format_k ] = format_ID
 
-
-        ref_ID = refs.get(rec['REF'], -1)
         if ref_ID == -1:
-            db_ref    = get_or_update( Refs      , 'ref_str'   , rec['REF'   ] )
-            ref_ID    = db_ref.ref_ID
-            refs[ rec['REF'] ] = ref_ID
+            ref_ID        = len( refs )
+            refs[ ref_k ] = ref_ID
 
-        var_type_ID = types.get( record.var_type, -1 )
-        if var_type_ID == -1:
-            db_var_type = get_or_update( VarType      , 'var_type_str'   , record.var_type )
-            var_type_ID = db_var_type.var_type_ID
-            types[ record.var_type ] = var_type_ID
-
-        var_subtype_ID = types.get( record.var_subtype, -1 )
-        if var_subtype_ID == -1:
-            db_var_subtype = get_or_update( VarSubType      , 'var_subtype_str'   , record.var_subtype )
-            var_subtype_ID = db_var_subtype.var_subtype_ID
-            types[ record.var_subtype ] = var_subtype_ID
-
-
-        alt_str   = ','.join(rec['ALT'   ])
-        alt_ID = alts.get(alt_str, -1)
         if alt_ID == -1:
-            db_alt    = get_or_update( Alts      , 'alt_str'   , alt_str )
-            alt_ID    = db_alt.alt_ID
-            refs[ alt_str ] = alt_ID
+            alt_ID        = len( alts )
+            alts[ alt_k ] = alt_ID
 
-        rec_samples   = sample2dict( record.samples )
-	rec_samples_0 = rec_samples[0]
+        if var_type_ID == -1:
+            var_type_ID         = len( types )
+            types[ var_type_k ] = var_type_ID
+
+        if var_subtype_ID == -1:
+            var_subtype_ID            = len( subtypes )
+            subtypes[ var_subtype_k ] = var_subtype_ID
+
+
+
+        rec_samples   = []
+        for sample in record.samples:
+            re = {
+                'called'    : sample.called,     # True if the GT is not ./.
+                'gt_alleles': sample.gt_alleles, # The numbers of the alleles called at a given sample
+                'gt_bases'  : sample.gt_bases,   # The actual genotype alleles. E.g. if VCF genotype is 0/1, return A/G
+                'gt_type'   : sample.gt_type,    # The type of genotype. hom_ref = 0 het = 1 hom_alt = 2 (we don;t track _which+ ALT) uncalled = None
+                'is_het'    : sample.is_het,     # Return True for heterozygous calls
+                'is_variant': sample.is_variant, # Return True if not a reference call
+                'phased'    : sample.phased,     # A boolean indicating whether or not the genotype is phased for this sample
+                'sample'    : sample.sample,     # The sample name
+                #'site'      : sample.site,       # The _Record for this _Call
+            }
+
+            re_data = {} # Dictionary of data from the VCF file
+            for field in sample.data._fields:
+                re_data[ field ] = getattr(sample.data, field)
+            re['data'] = re_data
+            rec_samples.append( re )
+
+
+        rec_samples_0 = rec_samples[0]
         if len( rec_samples ) != 1:
             print "more than one sample"
             sys.exit(1)
 
+
         rec_info     = rec['INFO']
 
+
         data = {
+            'coord_ID'              : coord_num,
             'file_ID'               : file_ID,
             'chrom_ID'              : chrom_ID,
             'format_ID'             : format_ID,
             'ref_ID'                : ref_ID,
             'alt_ID'                : alt_ID,
+            'chrompos_ID'           : chrompos_ID,
             'Pos'                   : rec['POS'   ],
             'Qual'                  : rec['QUAL'  ],
             'Filter'                : rec['FILTER'],
@@ -427,8 +526,21 @@ def process_file( db, infile ):
             'sample_1_name'         : samples_names.index( rec_samples_0['sample'] ),
         }
 
+
+
         pos            = ((regs-1) % dumpevery)
         records[ pos ] = data
+
+
+
+        if (debug > 0 and debug <= 4 ) or ( debug > 5 and regs % (debug/5) == 0 ) or ( debug < 0 and regs % printevery == 0 ):
+            #sys.stdout.write( str( pos ) + " " )
+            diffTime( infile, chrom, startTime, startTimeChrom, startTimeLap, regs, regsChrom, regsLap )
+            regsLap      = 0
+            startTimeLap = time.time()
+
+
+
 
         if pos == (dumpevery - 1):
             #print "DUMPING"
@@ -439,30 +551,23 @@ def process_file( db, infile ):
             #)
 
             execute(
-                Coords.__table__.insert(),
+                ins,
                 records
             )
             #records = [None] * dumpevery
 
 
-        if (debug > 0 and debug < 4 ) and ( debug > 5 and regs % (debug/5) == 0 ) or ( debug < 0 and regs % printevery == 0 ):
-            #sys.stdout.write( str( pos ) + " " )
-            diffTime( infile, chrom, startTime, startTimeChrom, startTimeLap, regs, regsChrom, regsLap )
-            regsLap      = 0
-            startTimeLap = time.time()
-
-
-        if regs == debug:
-            break
+    print coord_num
 
     diffTime( infile, chrom, startTime, startTimeChrom, startTimeLap, regs, regsChrom, regsLap )
 
+    return
     pos = (regs-1) % dumpevery
     if regs % dumpevery != 0:
         data = records[:pos+1]
         print "last pos", pos, 'data', len(data   )
         execute(
-            Coords.__table__.insert(),
+            ins,
             data
         )
         del data
@@ -505,52 +610,6 @@ def process_file( db, infile ):
 
         #http://pyvcf.readthedocs.org/en/latest/API.html#vcf-model-record
 
-
-def parseval( val ):
-    if repr(type(val)) == "<type 'list'>":
-        res = []
-        for e in val:
-            #print e, type(e)
-            res.append( str(e) )
-        return res
-    else:
-        return val
-
-
-def sample2dict( samples ):
-    #print samples
-
-    res = []
-    for sample in samples:
-        re = {
-            'called'    : sample.called,     # True if the GT is not ./.
-            'gt_alleles': sample.gt_alleles, # The numbers of the alleles called at a given sample
-            'gt_bases'  : sample.gt_bases,   # The actual genotype alleles. E.g. if VCF genotype is 0/1, return A/G
-            'gt_type'   : sample.gt_type,    # The type of genotype. hom_ref = 0 het = 1 hom_alt = 2 (we don;t track _which+ ALT) uncalled = None
-            'is_het'    : sample.is_het,     # Return True for heterozygous calls
-            'is_variant': sample.is_variant, # Return True if not a reference call
-            'phased'    : sample.phased,     # A boolean indicating whether or not the genotype is phased for this sample
-            'sample'    : sample.sample,     # The sample name
-            #'site'      : sample.site,       # The _Record for this _Call
-        }
-
-        re['data'] = calldata2dict( sample.data ) # Dictionary of data from the VCF file
-
-        res.append( re )
-
-    return res
-
-
-def calldata2dict( data ):
-    res = {}
-
-    for field in data._fields:
-        res[ field ] = getattr(data, field)
-
-    #pp.pprint( data )
-    #pp.pprint( res  )
-
-    return res
 
 
 

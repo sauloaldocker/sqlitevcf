@@ -32,6 +32,10 @@ def main(args, echo=True):
         os.remove( dbname )
     loaddb(dbname, echo=echo)
 
+
+
+
+
 class loaddb(object):
     def __init__(self, dbname, echo=False):
         print "creating engine", dbname
@@ -59,8 +63,7 @@ class loaddb(object):
     def get_session(self):
         return self.session
 
-    def get_or_update( self, cls, att, val ):
-
+    def get_or_update_single( self, cls, att, val ):
         if cls not in self.cache:
             self.cache[ cls ] = {}
 
@@ -85,6 +88,39 @@ class loaddb(object):
 
         return res
 
+    def get_or_update( self, cls, vals ):
+        if cls not in self.cache:
+            self.cache[ cls ] = {}
+
+        ccache = self.cache[ cls ]
+        ckey   = frozenset(vals.items())
+        res    = ccache.get( ckey, None )
+	#print ckey
+
+        if res is None:
+            #print "get_or_updates", ckey, 'NOT IN CACHE'
+            res = self.session.query( cls ).filter_by( **vals ).first()
+            if res is None:
+                #print "get_or_updates", ckey, 'NOT IN CACHE', 'NOT IN DB',
+                res = cls(**vals)
+                self.session.add( res )
+                self.session.commit()
+                self.session.flush()
+                #print res
+            else:
+                #print "get_or_updates", ckey, 'NOT IN CACHE', 'IN DB', res
+                pass
+            ccache[ ckey ] = res
+
+        else:
+            #print "get_or_update", ckey, 'IN CACHE', res
+            pass
+
+        return res
+
+
+    #get_foreign_keys
+    #get_pk_constraint
     def list_indexes(self, table_name=None):
         #http://stackoverflow.com/questions/5605019/listing-indices-using-sqlalchemy
         indexes = {}
@@ -189,7 +225,6 @@ class Chroms(Base):
     __table_args__ = {'sqlite_autoincrement': True}
     chrom_ID       = Column(Integer, Sequence('chrom_id'), primary_key=True, autoincrement=True )
     chrom_name     = Column(String , index=True, unique=True )
-    #coords         = relationship("Coords", order_by="Coords.coord_ID", primaryjoin="Chroms.chrom_ID==foreign(Coords.chrom_ID)")
 
     def __repr__(self):
         return "<Chroms(chrom_ID='%s', chrom_name='%s')>" % ( str(self.chrom_ID), self.chrom_name )
@@ -239,10 +274,6 @@ class VarSubType(Base):
     def __repr__(self):
         return "<VarSubType(var_subtype_ID='%s', var_subtype_str='%s')>" % ( str(self.var_subtype_ID), self.var_subtype_str )
 
-
-
-
-
 class Files(Base):
     __tablename__  = 'files'
     __table_args__ = {'sqlite_autoincrement': True}
@@ -250,12 +281,6 @@ class Files(Base):
     file_path      = Column(String , unique=True         , index=True                           )
     file_base      = Column(String)
     file_name      = Column(String)
-
-    #-FILES:
-    #--file_ID[AUTOINC]
-    #--file_base[STR]
-    #--file_name[STR]
-    #--file_path[STR]$
 
     def __repr__(self):
         return "<Files(file_ID='%s', file_path='%s', file_base='%s', file_name='%s')>" % \
@@ -319,9 +344,23 @@ class Header_meta(Base):
         return "<Header_meta(file_ID='%s', header_meta_ID='%s', header_meta_name='%s', header_meta_desc='%s')>" % \
         (str(self.file_ID), str(self.header_meta_ID), self.header_meta_name, self.header_meta_desc)
 
+class ChromPos(Base):
+    __tablename__         = 'chrompos'
+    #__table_args__        = {'sqlite_autoincrement': True}
+    chrompos_ID           = Column(Integer                              , index=True, primary_key=True )
+    chrom_ID              = Column(Integer                              , index=True, nullable=False )
+    Pos                   = Column(Integer                              , index=True, nullable=False )
+#    chrompos_ID           = Column(Integer, Sequence('chrompos_id')                                 , primary_key=True, autoincrement=True )
+#    chrom_ID              = Column(Integer, ForeignKey('chrom.chrom_ID'), index=True, nullable=False )
+#    chrom_src             = relationship("Chroms", backref=backref('coords', order_by=Pos), cascade="all, delete")
+
+    def __repr__(self):
+        return "<ChromPos(chrompos_ID='%s', chrom_ID='%s', Pos='%s')>" % \
+        (str(self.chrompos_ID), str(self.chrom_ID), self.Pos)
+
 class Coords(Base):
     __tablename__         = 'coords'
-    __table_args__        = {'sqlite_autoincrement': True}
+    #__table_args__        = {'sqlite_autoincrement': True}
 
     #Chrom                 = Column(String(CHROM_SIZE        ), index=True, nullable=False )
     #Format                = Column(String(FORMAT_COL_SIZE   ), index=True, nullable=False )
@@ -329,9 +368,11 @@ class Coords(Base):
     #Alt                   = Column(String(COORDS_ALT_SIZE   ), index=True, nullable=False )
     #chrom_ID              = Column(Integer, index=True, nullable=False )
 
-    coord_ID              = Column(Integer, Sequence('coord_id'), primary_key=True, autoincrement=True )
+    #coord_ID              = Column(Integer, Sequence('coord_id')                         , primary_key=True, autoincrement=True )
+    coord_ID              = Column(Integer                   , primary_key=True )
     file_ID               = Column(Integer                   , index=True, nullable=False )
     chrom_ID              = Column(Integer                   , index=True, nullable=False )
+
     Pos                   = Column(Integer                   , index=True, nullable=False )
     format_ID             = Column(Integer                   , index=True, nullable=False )
     ref_ID                = Column(Integer                   , index=True, nullable=False )
@@ -339,6 +380,10 @@ class Coords(Base):
     Qual                  = Column(Float                     , index=True, nullable=False )
     Filter                = Column(String(COORDS_FILTER_SIZE), index=True                 )
     Id                    = Column(String(COORDS_ID_SIZE    ), index=True                 )
+
+    chrompos_ID           = Column(Integer                   , index=True, nullable=False )
+#    chrompos_ID           = Column(Integer, ForeignKey('chrompos.chrompos_ID'), index=True, nullable=False )
+#    chrompos_src          = relationship("ChromPos", backref=backref('data', order_by=Pos), cascade="all, delete")
 
     info_AF1              = Column(Float  , index=True)
     info_CI95_1           = Column(Float  , index=True)
@@ -350,12 +395,7 @@ class Coords(Base):
     info_DP4_4            = Column(Integer, index=True)
     info_FQ               = Column(Integer, index=True)
     info_MQ               = Column(Integer, index=True)
-    # 'INFO': {'AF1': 1.0,
-    #          'CI95': [1.0, 1.0],
-    #          'DP': 38,
-    #          'DP4': [0, 0, 19, 19],
-    #          'FQ': -141.0,
-    #          'MQ': 60},
+
     meta_aaf_1            = Column(Float                      , index=True)
     meta_aaf_2            = Column(Float                      , index=True)
     #meta_alleles_1        = Column(String(COORDS_META_ALLELE ), index=True)
@@ -452,18 +492,6 @@ class Coords(Base):
     #UniqueConstraint(file_ID, header_info_name)
     #ForeignKeyConstraint(['chrom_ID', 'file_ID'], ['chrom.chrom_ID', 'files.file_ID'])
 
-    #-COORDS
-    #--coord_ID[AUTOINC]$
-    #--file_ID[EXTKEY]$!
-    #--format_ID[EXTKEY]$!
-    #--chrom_ID[EXTKEY]$!
-    #--ref_ID[EXTKEY]$!
-    #--alt_ID[EXTKEY]$!
-    #--filter[str]
-    #--id[STR]*
-    #--pos[INT]*
-    #--qual[FLOAT]*
-
     def __repr__(self):
         return "<Coords(file_ID='%s', coord_ID='%s', format_ID='%s', chrom_ID='%s', ref_ID='%s', alt_ID='%s', Filter='%s', Id='%s', Pos='%d', Qual='%.3f')>" % \
         (str(self.file_ID), str(self.coord_ID), str(self.format_ID), str(self.chrom_ID), str(self.ref_ID), str(self.alt_ID), \
@@ -475,135 +503,6 @@ dbs = (Chroms, Format_col, Refs, Alts, Files, Header, Header_format, Header_info
 if __name__ == '__main__':
     main(sys.argv[1:])
 
-
-#CREATE TABLE refs (
-#        "ref_ID" INTEGER NOT NULL,
-#        ref_str VARCHAR NOT NULL,
-#        PRIMARY KEY ("ref_ID", ref_str),
-#        UNIQUE (ref_str)
-#)
-#
-#CREATE TABLE coords_sample_info (
-#        "coord_sample_info_ID" INTEGER NOT NULL,
-#        coord_sample_info_name VARCHAR NOT NULL,
-#        "coord_sample_info_valueS" VARCHAR,
-#        "coord_sample_info_valueI" INTEGER,
-#        "coord_sample_info_valueF" FLOAT,
-#        "coord_sample_info_valueB" BOOLEAN,
-#        PRIMARY KEY ("coord_sample_info_ID", coord_sample_info_name),
-#        CHECK ("coord_sample_info_valueB" IN (0, 1))
-#)
-#
-#CREATE TABLE chrom (
-#        "chrom_ID" INTEGER NOT NULL,
-#        chrom_name VARCHAR NOT NULL,
-#        PRIMARY KEY ("chrom_ID", chrom_name),
-#        UNIQUE (chrom_name)
-#)
-#
-#CREATE TABLE header (
-#        "header_ID" INTEGER NOT NULL,
-#        header_name VARCHAR NOT NULL,
-#        header_value VARCHAR,
-#        PRIMARY KEY ("header_ID", header_name),
-#        UNIQUE (header_name)
-#)
-#
-#CREATE TABLE alts (
-#        "alts_ID" INTEGER NOT NULL,
-#        alts_str VARCHAR NOT NULL,
-#        PRIMARY KEY ("alts_ID", alts_str),
-#        UNIQUE (alts_str)
-#)
-#
-#CREATE TABLE header_info (
-#        "header_info_ID" INTEGER NOT NULL,
-#        header_info_name VARCHAR NOT NULL,
-#        header_info_type VARCHAR,
-#        header_info_desc VARCHAR,
-#        header_info_args INTEGER,
-#        PRIMARY KEY ("header_info_ID", header_info_name),
-#        UNIQUE (header_info_name)
-#)
-#
-#CREATE TABLE coords_meta (
-#        "coord_meta_ID" INTEGER NOT NULL,
-#        coord_meta_name VARCHAR NOT NULL,
-#        "coord_meta_valueS" VARCHAR,
-#        "coord_meta_valueI" INTEGER,
-#        "coord_meta_valueF" FLOAT,
-#        "coord_meta_valueB" BOOLEAN,
-#        PRIMARY KEY ("coord_meta_ID", coord_meta_name),
-#        CHECK ("coord_meta_valueB" IN (0, 1))
-#)
-#
-#CREATE TABLE header_format (
-#        "header_format_ID" INTEGER NOT NULL,
-#        header_format_name VARCHAR NOT NULL,
-#        header_format_type VARCHAR,
-#        header_format_desc VARCHAR,
-#        header_format_args INTEGER,
-#        PRIMARY KEY ("header_format_ID", header_format_name),
-#        UNIQUE (header_format_name)
-#)
-#
-#CREATE TABLE coords_info (
-#        "coord_info_ID" INTEGER NOT NULL,
-#        coord_info_name VARCHAR NOT NULL,
-#        "coord_info_valueS" VARCHAR,
-#        "coord_info_valueI" INTEGER,
-#        "coord_info_valueF" FLOAT,
-#        "coord_info_valueB" BOOLEAN,
-#        PRIMARY KEY ("coord_info_ID", coord_info_name),
-#        CHECK ("coord_info_valueB" IN (0, 1))
-#)
-#
-#CREATE TABLE coords_sample (
-#        "coord_sample_ID" INTEGER NOT NULL,
-#        coord_sample_name VARCHAR NOT NULL,
-#        PRIMARY KEY ("coord_sample_ID", coord_sample_name)
-#)
-#
-#CREATE TABLE files (
-#        "file_ID" INTEGER NOT NULL,
-#        file_path VARCHAR NOT NULL,
-#        file_base VARCHAR,
-#        file_name VARCHAR,
-#        PRIMARY KEY ("file_ID", file_path),
-#        UNIQUE (file_path)
-#)
-#
-#CREATE TABLE format_col (
-#        "format_ID" INTEGER NOT NULL,
-#        format_str VARCHAR NOT NULL,
-#        PRIMARY KEY ("format_ID", format_str),
-#        UNIQUE (format_str)
-#)
-#
-#CREATE TABLE header_meta (
-#        "header_meta_ID" INTEGER NOT NULL,
-#        header_meta_name VARCHAR NOT NULL,
-#        header_meta_desc VARCHAR,
-#        PRIMARY KEY ("header_meta_ID", header_meta_name),
-#        UNIQUE (header_meta_name)
-#)
-#
-#CREATE TABLE coords (
-#        "coord_ID" INTEGER NOT NULL,
-#        "Pos" INTEGER NOT NULL,
-#        "Filter" VARCHAR,
-#        "Id" VARCHAR,
-#        "Qual" FLOAT,
-#        "format_ID" INTEGER,
-#        "chrom_ID" INTEGER,
-#        "ref_ID" INTEGER,
-#        "alt_ID" INTEGER,
-#        PRIMARY KEY ("coord_ID", "Pos"),
-#        FOREIGN KEY("format_ID") REFERENCES format_col ("format_ID"),
-#        FOREIGN KEY("chrom_ID") REFERENCES chrom ("chrom_ID"),
-#        FOREIGN KEY("ref_ID") REFERENCES refs ("ref_ID"),
-#        FOREIGN KEY("alt_ID") REFERENCES alts ("alts_ID")
-#)
 
 """
 fileReg   = Files(file_path=infile_abs_path, file_base=infile_basename, file_name=infile)
@@ -618,71 +517,3 @@ session.add( coord )
 session.commit()
 """
 
-#$ - primary key
-#* - indexed
-#! - external key
-#
-#DB:
-#-FILES:
-#--file_ID[AUTOINC]
-#--file_base[STR]
-#--file_name[STR]
-#--file_path[STR]$
-#-HEADER
-#--file_ID[EXTKEY]$!
-#--header_name[STR]*
-#--header_value[STR]
-#-FORMATS:
-#--file_ID[EXTKEY]$!
-#--key_name[STR]$
-#--key_type[STR]
-#--key_desc[STR]
-#--key_args[INT]
-#-INFOS:
-#--file_ID[EXTKEY]$!
-#--info_name[STR]$
-#--info_type[STR]
-#--info_desc[STR]
-#--info_args[INT]
-#-META
-#--file_ID[EXTKEY]$!
-#--meta_name[STR]
-#--meta_desc[STR]
-#-COORDS
-#--coord_ID[AUTOINC]$
-#--file_ID[EXTKEY]$!
-#--format_ID[EXTKEY]$!
-#--chrom_ID[EXTKEY]$!
-#--ref_ID[EXTKEY]$!
-#--alt_ID[EXTKEY]$!
-#--filter[str]
-#--id[STR]*
-#--pos[INT]*
-#--qual[FLOAT]*
-#-COORDS_INFO
-#--coord_ID[EXTKEY]$!
-#--coord_info_name[STR]$
-#--coord_info_value[STR]*
-#-COORDS_NFO
-#--coord_ID[EXTKEY]$!
-#--coord_info_ID[AUTOINC]$
-#--coord_info_name[STR]$
-#--coord_info_value[STR]
-#-COODS_SAMPLES
-#--coord_ID[EXTKEY]$!
-#--coord_sample_ID[AUTOINC]$
-#--coord_sample_name[STR]*
-#--coord_sample_info_name[STR]*
-#--coord_sample_info_value[STR]*
-#-CHROMS
-#--chrom_ID[AUTOINC]$
-#--chrom_name[STR]$
-#-FORMATS
-#--format_ID[AUTOINC]$
-#--format_str[STR]$
-#-REFS
-#--ref_ID[AUTOINC]$
-#--ref_nuc[STR]
-#-ALTS
-#--alt_ID[AUTOINC]$
-#--alt_nuc[STR]$

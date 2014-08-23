@@ -16,28 +16,96 @@ from   pprint import pprint as pp
 PORT=os.environ.get( 'SQLITE_PORT_5000_TCP_PORT',        5000 )
 IPAD=os.environ.get( 'SQLITE_PORT_5000_TCP_ADDR', '127.0.0.1' )
 
-
 queries = [
-	[ 'chrom', dict(results_per_page=15), [dict(name='chrom_name', op='like', val='SL2.40%')], [] ]
+	[ 'chrom', 
+		dict( 
+			url_params=dict(
+					results_per_page=15
+			), 
+			filters=[
+					dict(name='chrom_name', op='like', val='SL2.40%' ), 
+				],
+		)
+	],
+	[ 'coords', 
+		dict( 
+			url_params=dict(
+				results_per_page=15
+			), 
+			filters=[
+					dict(name='chrom_ID', op='=='  , val=1     ), 
+					dict(name='Pos'     , op='>='  , val=1000  ),  
+					dict(name='Pos'     , op='<='  , val=20000 )
+				],
+		)
+	],
+	[ 'coords', 
+		dict( 
+			url_params=dict(
+				results_per_page=15
+			), 
+			filters=[
+					dict(name='chrom_ID', op='=='  , val=1     ), 
+					dict(name='Pos'     , op='>='  , val=1000  ),  
+					dict(name='Pos'     , op='<='  , val=20000 )
+				],
+			group_by=[dict(field='file_ID')]
+		)
+	],
+	[ 'coords', 
+		dict( 
+			api='api/eval',
+			functions=[ {"name": "count", "field": "chrom_ID"} ]
+		)
+	],
+	[ 'coords', 
+		dict( 
+			api='api/eval',
+			functions=[ {"name": "min", "field": "Qual"} ]
+		)
+	],
+	[ 'coords', 
+		dict( 
+			api='api/eval',
+			functions=[ {"name": "max", "field": "Qual"} ]
+		)
+	],
+	[ 'coords', 
+		dict( 
+			api='api/eval',
+			functions=[ {"name": "avg"  , "field": "Qual"} ]
+		)
+	]
 ]
 
 
-for DBNA, url_params, filters, extras in queries:
-	url           = 'http://%s:%d/api/%s' % ( IPAD, int(PORT), DBNA )
+def query(DBNA, url_params=None, filters=None, extras=None, functions=None, group_by=None, api='api'):
+	url           = 'http://%s:%d/%s/%s' % ( IPAD, int(PORT), api, DBNA )
 	print "URL", url
 
 	headers  = {'Content-Type': 'application/json'}
-	req      = dict( filters=filters )
+	req      = dict()
 
-	for extra in extras:
-		for e in extra:
-			req[ e ] = extra[ e ]
+	if filters:
+		req[ 'filters'   ] = filters
+
+	if functions:
+		req[ 'functions' ] = functions
+
+	if group_by:
+		req[ 'group_by'  ] = group_by
+
+	if extras:
+		for extra in extras:
+			for e in extra:
+				req[ e ] = extra[ e ]
 
 	pp( req )
 
 	params   = dict( q=json.dumps( req ) )
-	for p in url_params:
-		params[ p ] = url_params[ p ]
+	if url_params:
+		for p in url_params:
+			params[ p ] = url_params[ p ]
 
 	pp( params )
 
@@ -50,6 +118,14 @@ for DBNA, url_params, filters, extras in queries:
 	print "RESPONSE TEXT\n", response.text
 	#print( response.json() )
 	#assert response.status_code == 200
+
+
+if __name__ == '__main__':
+	for dbna, kwargs in queries[2:3]:
+		query(dbna, **kwargs)
+
+
+#GET /api/eval/person?q={"functions": [{"name": "count", "field": "id"}]}
 
 #curl   -G   -H "Content-type: application/json"   -d "q={\"filters\":[{\"name\":\"chrom_name\",\"op\":\"like\",\"val\":\"SL2.0ch0%\"}]}"   http://127.0.0.1:5000/api/chrom
 

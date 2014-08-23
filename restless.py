@@ -43,6 +43,11 @@ manager = flask.ext.restless.APIManager(app, flask_sqlalchemy_db=db)
 # Create API endpoints, which will be available at /api/<tablename> by
 # default. Allowed HTTP methods can be specified as well.
 databases_meta = defaultdict(list)
+
+#class ChromGrp(database.Chroms):
+#	pass
+#database.dbs = tuple( list(database.dbs) + [ChromGrp] )
+
 for dbn in database.dbs:
 	print "exporting", dbn
 	#manager.create_api(dbn, methods=['GET'], allow_functions=True, collection_name=dbn.__tablename__)

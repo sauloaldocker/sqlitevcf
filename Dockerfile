@@ -31,6 +31,16 @@ ENV PYTHON_EGG_DIR /tmp
 
 RUN easy_install -Z pip pyvcf sqlalchemy sandman requests Flask-Restless flask-cors
 
+RUN cd /opt; \
+    wget https://bitbucket.org/pypy/pypy/downloads/pypy-2.3.1-linux64.tar.bz2; \
+    tar xvf pypy-2.3.1-linux64.tar.bz2; \
+    rm pypy-2.3.1-linux64.tar.bz2; \
+    ln -s $PWD/pypy-2.3.1-linux64/bin/pypy /usr/bin/; \
+    cd /opt/pypy-2.3.1-linux64/site-packages; \
+    cp -R /usr/local/lib/python2.7/dist-packages/* .
+
+
+
 VOLUME /data
 VOLUME /db
 
