@@ -40,16 +40,16 @@ def main(args, echo=True):
 
 
 class loaddb(object):
-    def __init__(self, dbname, echo=False):
+    def __init__(self, dbname, echo=False, timeout=10):
         print "creating engine", dbname
 
         self.cache   = {}
 
         self.dbname  = 'sqlite:///' + dbname
 
-        self.engine  = create_engine(self.dbname, echo=echo)
+        self.engine  = create_engine(self.dbname, echo=echo, connect_args={'timeout': timeout})
 
-        if self.dbname == 'sqlite:///:memory:' or not os.path.exists(self.dbname):
+        if self.dbname == 'sqlite:///:memory:' or not os.path.exists(dbname):
             print "creating database"
             Base.metadata.create_all(self.engine)
 
@@ -62,6 +62,9 @@ class loaddb(object):
         self.insp    = reflection.Inspector.from_engine( self.engine )
 
         print "finished"
+
+    def close(self):
+        self.session.close()
 
     def get_session(self):
         return self.session
@@ -183,13 +186,6 @@ class loaddb(object):
 Base = declarative_base()
 
 
-#CHROM_SIZE                    =  256
-#FORMAT_COL_SIZE               =   32
-#REF_SIZE                      = 2048
-#ALT_SIZE                      = 2048
-#FILEPATH_SIZE                 = 1024
-#FILEBASE_SIZE                 =  512
-#FILENAME_SIZE                 =  256
 
 #HEADER_NAME_SIZE              =   32
 #HEADER_VALUE_SIZE             =  512
@@ -376,26 +372,30 @@ class Coords(Base):
     COORDS_SAMPLE_GT              =   16
     COORDS_SAMPLE_GT_BASES        =  256
 
-    #Chrom                 = Column(String(CHROM_SIZE        ), index=True, nullable=False )
-    #Format                = Column(String(FORMAT_COL_SIZE   ), index=True, nullable=False )
-    #Ref                   = Column(String(COORDS_REF_SIZE   ), index=True, nullable=False )
-    #Alt                   = Column(String(COORDS_ALT_SIZE   ), index=True, nullable=False )
+
+    CHROM_SIZE                    =  256
+    FORMAT_COL_SIZE               =   32
+
+    Chrom                 = Column(String(CHROM_SIZE        ), index=True, nullable=False )
+    Format                = Column(String(FORMAT_COL_SIZE   ), index=True, nullable=False )
+    Ref                   = Column(String(COORDS_REF_SIZE   ), index=True, nullable=False )
+    Alt                   = Column(String(COORDS_ALT_SIZE   ), index=True, nullable=False )
     #chrom_ID              = Column(Integer, index=True, nullable=False )
 
-    #coord_ID              = Column(Integer, Sequence('coord_id')                         , primary_key=True, autoincrement=True )
-    coord_ID              = Column(Integer                    , primary_key=True )
-    file_ID               = Column(Integer                    , index=True, nullable=False )
-    chrom_ID              = Column(Integer                    , index=True, nullable=False )
+    coord_ID              = Column(Integer, Sequence('coord_id')                         , primary_key=True, autoincrement=True )
+    #coord_ID              = Column(Integer                    , primary_key=True )
+    #file_ID               = Column(Integer                    , index=True, nullable=False )
+    #chrom_ID              = Column(Integer                    , index=True, nullable=False )
 
     Pos                   = Column(Integer                    , index=True, nullable=False )
-    format_ID             = Column(Integer                    , index=True, nullable=False )
-    ref_ID                = Column(Integer                    , index=True, nullable=False )
-    alt_ID                = Column(Integer                    , index=True, nullable=False )
+    #format_ID             = Column(Integer                    , index=True, nullable=False )
+    #ref_ID                = Column(Integer                    , index=True, nullable=False )
+    #alt_ID                = Column(Integer                    , index=True, nullable=False )
     Qual                  = Column(Float                      , index=True, nullable=False )
     Filter                = Column(String(COORDS_FILTER_SIZE) , index=True                 )
     Id                    = Column(String(COORDS_ID_SIZE    ) , index=True                 )
 
-    chrompos_ID           = Column(Integer                    , index=True, nullable=False )
+    #chrompos_ID           = Column(Integer                    , index=True, nullable=False )
     #chrompos_ID           = Column(Integer, ForeignKey('chrompos.chrompos_ID'), index=True, nullable=False )
     #chrompos_src          = relationship("ChromPos", backref=backref('data', order_by=Pos), cascade="all, delete")
 
@@ -487,7 +487,12 @@ class Coords(Base):
         (str(self.file_ID), str(self.coord_ID), str(self.format_ID), str(self.chrom_ID), str(self.ref_ID), str(self.alt_ID), \
          str(self.Filter) , str(self.Id)      , self.Pos           , self.Qual)
 
+    Index("coords_chrom_pos"     , Chrom, Pos)
+    Index("coords_chrom_pos_qual", Chrom, Pos, Qual)
+    Index("coords_chrom_qual"    , Chrom, Qual)
+
 dbs = (Chroms, Format_col, Refs, Alts, Files, Header, Header_format, Header_info, Header_meta, Coords)
+dbs = (Files, Header, Header_format, Header_info, Header_meta, Coords)
 
 if __name__ == '__main__':
     main(sys.argv[1:])

@@ -6,8 +6,7 @@ import argparse
 import time
 import copy
 
-from multiprocessing        import Pool, Manager
-#from multiprocessing.queues import SimpleQueue
+from multiprocessing        import Pool
 from itertools import izip
 from collections import OrderedDict, defaultdict
 
@@ -25,7 +24,8 @@ TODO:
 """
 
 SINGLE_THREADED = False
-NUM_THREADS     = 1
+NUM_THREADS     = 5
+TIMEOUT         = 600
 
 #dumpevery       =  6400
 #debug           = dumpevery * 2 # -1 no; > 1 = delete database, number of samples to read
@@ -53,16 +53,17 @@ eff_keys        = None
 
 processing      = False
 
+
+
 def main(args):
     print args
     indb    = args[0 ]
     infiles = args[1:]
-    db      = loaddb(indb, echo=sql_echo)
+    db      = loaddb(indb, echo=sql_echo, timeout=TIMEOUT)
 
     print "droping indexes"
     indexes        = db.list_indexes( table_name='coords' )
     db.drop_indexes(table_name='coords')
-
 
     file_IDs        = {}
     session         = db.get_session()
@@ -87,15 +88,18 @@ def main(args):
         ifhd.close()
 
 
+    db.close()
+
+
+
     if not SINGLE_THREADED:
         pool    = Pool( processes=NUM_THREADS )
-        manager = Manager()
-        queue   = manager.Queue()
         procs   = []
 
         for infile in infiles:
             print "adding thread to", infile
-            proc    = pool.apply_async(process_file_multi, (queue, infile))
+            file_ID = file_IDs[ infile ]
+            proc    = pool.apply_async(process_file, (infile, file_ID, indb))
             procs.append( [ infile, proc ] )
 
         pool.close()
@@ -114,7 +118,6 @@ def main(args):
                             print "res", r
                             procs[ procnum ][ 1 ] = None
 
-                            process_q( queue, db, session, metadata, file_IDs, infile, running )
                         else:
                             print "error processing file", infile
                             r = proc.get()
@@ -122,42 +125,19 @@ def main(args):
                             pool.terminate()
                             sys.exit(1)
 
-            if queue.empty():
-                #print "queue empty.", running, "running"
-                if running == 0:
-                    while processing:
-                        print "no running thread. waiting processing to finish"
-                        time.sleep(5)
-
-                    print "no running thread. finished"
-                    break
-                time.sleep(1)
-
-            else:
-                process_q( queue, db, session, metadata, file_IDs, infile, running )
+            if running == 0:
+                break
+            time.sleep(1)
 
     else:
-        processor = get_process_records_single(db, session, file_IDs, metadata)
         for infile in infiles:
-            process_file( infile, processor )
+            process_file( infile, file_ID, indb )
 
-    process_metadata( db, session, metadata )
+    #process_metadata( db, session, metadata )
 
     print "adding indexes"
     db.add_indexes(indexes, 'coords')
     print "finished"
-
-
-def process_q( queue, db, session, metadata, file_IDs, infile, running ):
-    print "queue not empty.", running, "still running.", NUM_THREADS, 'threads.', queue.qsize(),"in queue. whiling"
-    while not queue.empty():
-        print "queue not empty.", running, "still running.", NUM_THREADS, 'threads.', queue.qsize(),"in queue"
-        infile, data = queue.get_nowait()
-        print "got data from file", infile
-        file_ID      = file_IDs[ infile ]
-        #pp( data )
-        process_records( db, session, infile, file_ID, metadata, data )
-        time.sleep(0.5)
 
 
 def diffTime( runid, chrom, startTimeFile, startTimeChrom, startTimeLap, regs, regsChrom, regsLap ):
@@ -185,162 +165,6 @@ def diffTime( runid, chrom, startTimeFile, startTimeChrom, startTimeLap, regs, r
         runid, diffTimeStart, diffTimeFile, chrom, diffTimeChrom, diffTimeLap,
         runid, diffRegsStart, diffRegsFile, chrom, diffRegsChrom, diffRegsLap,
         runid, speedStart   , speedFile   , chrom, speedChrom   , speedLap )
-
-
-def get_process_records_single( db, session, file_IDs, metadata ):
-    def processor(infile, data):
-        process_records(db, session, infile, file_IDs[infile], metadata, data)
-
-    return processor
-
-
-def get_process_records_multi( q ):
-    def processor(infile, data):
-        try:
-            q.put_nowait( ( infile, data ) )
-        except Exception as inst:
-            print "ERROR PUTTING TO QUEUE"
-            print type(inst)     # the exception instance
-            print inst.args      # arguments stored in .args
-            print inst           # __str__ allows args to be printed directly
-            raise
-
-    return processor
-
-
-def process_records( db, session, infile, file_ID, metadata, records ):
-    execute         = db.engine.execute
-    ins             = Coords.__table__.insert()
-    global processing
-    processing      = True
-
-    #pp( records )
-
-    chromposes      = metadata['chromposes']
-    formats         = metadata['formats'   ]
-    refs            = metadata['refs'      ]
-    alts            = metadata['alts'      ]
-    types           = metadata['types'     ]
-    subtypes        = metadata['subtypes'  ]
-    chroms          = metadata['chroms'    ]
-    get_or_update   = db.get_or_update
-
-    global coord_num
-    print infile, "COORD INITIAL", coord_num, 'appending', len(records)
-
-    for data in records:
-        coord_num     += 1
-
-        pos            = data['Pos']
-        chrom_k        = ( ('chrom_name'       , data['chrom_ID']), )
-        chrom_ID       = chroms.get(     chrom_k      , -1 )
-
-        if chrom_ID == -1:
-            chrom_ID          = len( chroms ) + 1
-            chroms[ chrom_k ] = chrom_ID
-
-        chrompos_k     = ( ('chrom_ID'       , chrom_ID                ), ('Pos', pos) )
-        format_k       = ( ('format_str'     , data['format_ID'       ]), )
-        ref_k          = ( ('ref_str'        , data['ref_ID'          ]), )
-        alt_k          = ( ('alt_str'        , data['alt_ID'          ]), )
-        var_type_k     = ( ('var_type_str'   , data['meta_var_type'   ]), )
-        var_subtype_k  = ( ('var_subtype_str', data['meta_var_subtype']), )
-
-        chrompos_ID    = chromposes.get( chrompos_k   , -1 )
-        format_ID      = formats.get(    format_k     , -1 )
-        ref_ID         = refs.get(       ref_k        , -1 )
-        alt_ID         = alts.get(       alt_k        , -1 )
-        var_type_ID    = types.get(      var_type_k   , -1 )
-        var_subtype_ID = subtypes.get(   var_subtype_k, -1 )
-
-        if chrompos_ID    == -1:
-            chrompos_ID              = len( chromposes ) + 1
-            chromposes[ chrompos_k ] = chrompos_ID
-
-        if format_ID      == -1:
-            format_ID                = len( formats ) + 1
-            formats[ format_k ]      = format_ID
-
-        if ref_ID         == -1:
-            ref_ID        = len( refs ) + 1
-            refs[ ref_k ] = ref_ID
-
-        if alt_ID         == -1:
-            alt_ID        = len( alts ) + 1
-            alts[ alt_k ] = alt_ID
-
-        if var_type_ID    == -1:
-            var_type_ID         = len( types ) + 1
-            types[ var_type_k ] = var_type_ID
-
-        if var_subtype_ID == -1:
-            var_subtype_ID            = len( subtypes ) + 1
-            subtypes[ var_subtype_k ] = var_subtype_ID
-
-        data['coord_ID'        ] = coord_num
-        data['file_ID'         ] = file_ID
-        data['chrom_ID'        ] = chrom_ID
-        data['format_ID'       ] = format_ID
-        data['ref_ID'          ] = ref_ID
-        data['alt_ID'          ] = alt_ID
-        data['chrompos_ID'     ] = chrompos_ID
-        data['meta_var_type'   ] = var_type_ID
-        data['meta_var_subtype'] = var_subtype_ID
-
-    execute(
-        ins,
-        records
-    )
-
-    session.commit()
-    session.flush()
-
-    print infile, "COORD FINAL  ", coord_num
-    processing      = False
-
-
-def process_file_multi( q, infile ):
-    processor = get_process_records_multi(q)
-    process_file( infile, processor )
-
-
-def process_metadata( db, session, metadata ):
-    execute         = db.engine.execute
-
-    tables = (
-        ( 'chroms'    , 'chrom_ID'      , Chroms     ),
-        ( 'chromposes', 'chrompos_ID'   , ChromPos   ),
-        ( 'formats'   , 'format_ID'     , Format_col ),
-        ( 'refs'      , 'ref_ID'        , Refs       ),
-        ( 'alts'      , 'alt_ID'        , Alts       ),
-        ( 'types'     , 'var_type_ID'   , VarType    ),
-        ( 'subtypes'  , 'var_subtype_ID', VarSubType )
-    )
-
-    for table_name, key_id_name, table in tables:
-        data      = metadata[ table_name ]
-        #print "TABLE NAME", table_name, "KEY ID NAME", key_id_name, "LEN", len(data), data
-        ins       = table.__table__.insert()
-        registers = [None] * len(data)
-        reg_count = 0
-
-        for val_tuple in data:
-            #print "  REG", reg_count
-            #print "    VAL TUPLE", val_tuple
-            val_dict   = dict( (x, y) for x, y in val_tuple )
-            #print "    VAL DICT ", val_dict
-            data_num = data[ val_tuple ]
-            #print "    DATA NUM ", data_num
-            val_dict[ key_id_name ] = data_num
-            #print "    VAL DICT ", val_dict
-            registers[ reg_count  ] = val_dict
-            reg_count += 1
-
-        print "INSERTING", table_name
-        execute( ins, registers )
-        print "INSERTED ", table_name
-    session.commit()
-    session.flush()
 
 
 def add_header( session, vcf_reader, fileReg ):
@@ -509,9 +333,37 @@ def parseval( val ):
         return val
 
 
-def process_file( infile, saver ):
+def process_records( indb, infile, file_ID, records ):
+    db              = loaddb(indb, echo=False, timeout=TIMEOUT)
+    session         = db.get_session()
+
+    execute         = db.engine.execute
+    ins             = Coords.__table__.insert()
+    global processing
+    processing      = True
+
+    #pp( records )
+
+    global coord_num
+    print infile, "COORD INITIAL", coord_num, 'appending', len(records)
+
+    execute(
+        ins,
+        records
+    )
+
+    session.commit()
+    session.flush()
+
+    print infile, "COORD FINAL  ", coord_num
+
+    db.close()
+
+    processing      = False
+
+
+def process_file( infile, file_ID, indb ):
     print "processing", infile
-    sys.stdin.close()
 
     if not os.path.exists( infile ):
         print "input file %s does not exists" % infile
@@ -603,17 +455,18 @@ def process_file( infile, saver ):
             #'alt_ID'                : alt_ID,
             #'chrompos_ID'           : chrompos_ID,
 
-            'coord_ID'              : None,
-            'file_ID'               : None,
-            'chrom_ID'              : rec['CHROM'],
-            'format_ID'             : rec['FORMAT'],
-            'ref_ID'                : rec['REF'],
-            'alt_ID'                : alt_str,
+
+#            'coord_ID'              : None,
+            'file_ID'               : file_ID,
+            'Chrom'                 : chrom,
+            'Format'                : rec['FORMAT'],
+            'Ref'                   : rec['REF'],
+            'Alt'                   : alt_str,
             'chrompos_ID'           : None,
             'meta_var_type'         : record.var_type,
             'meta_var_subtype'      : record.var_subtype,
 
-            'Pos'                   : rec['POS'   ],
+            'Pos'                   : pos,
             'Qual'                  : rec['QUAL'  ],
             'Filter'                : rec['FILTER'],
             'Id'                    : rec['ID'    ],
@@ -720,7 +573,7 @@ def process_file( infile, saver ):
             #http://stackoverflow.com/questions/11769366/why-is-sqlalchemy-insert-with-sqlite-25-times-slower-than-using-sqlite3-directly
             print "processing", infile, "pos", pos, 'data', len( records ), 'sending'
             try:
-                saver( infile, records )
+                process_records( indb, infile, file_ID, records )
             except Exception as inst:
                 print "ERROR SENDING TO SAVER"
                 print type(inst)     # the exception instance
@@ -741,7 +594,7 @@ def process_file( infile, saver ):
         data = records[:pos+1]
         print "processing", infile, "pos", pos, 'data', len( data ), 'LAST. sending'
         try:
-            saver( infile, data )
+            process_records( indb, infile, file_ID, data )
         except Exception as inst:
             print "ERROR SENDING TO SAVER LAST"
             print type(inst)     # the exception instance
