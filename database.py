@@ -23,8 +23,8 @@ from sqlalchemy.orm import relationship, backref
 
 print sqlalchemy.__version__
 
-SNPEFF = False
-SNPEFF =  True
+SNPEFF = True
+
 
 
 def main(args, echo=True):
@@ -358,7 +358,6 @@ class ChromPos(Base):
 class Coords(Base):
     __tablename__         = 'coords'
     #__table_args__        = {'sqlite_autoincrement': True}
-
     COORDS_FILTER_SIZE            =   16
     COORDS_ID_SIZE                =   64
     COORDS_INFO_NAME_SIZE         =   16
@@ -384,32 +383,32 @@ class Coords(Base):
     #chrom_ID              = Column(Integer, index=True, nullable=False )
 
     #coord_ID              = Column(Integer, Sequence('coord_id')                         , primary_key=True, autoincrement=True )
-    coord_ID              = Column(Integer                   , primary_key=True )
-    file_ID               = Column(Integer                   , index=True, nullable=False )
-    chrom_ID              = Column(Integer                   , index=True, nullable=False )
+    coord_ID              = Column(Integer                    , primary_key=True )
+    file_ID               = Column(Integer                    , index=True, nullable=False )
+    chrom_ID              = Column(Integer                    , index=True, nullable=False )
 
-    Pos                   = Column(Integer                   , index=True, nullable=False )
-    format_ID             = Column(Integer                   , index=True, nullable=False )
-    ref_ID                = Column(Integer                   , index=True, nullable=False )
-    alt_ID                = Column(Integer                   , index=True, nullable=False )
-    Qual                  = Column(Float                     , index=True, nullable=False )
-    Filter                = Column(String(COORDS_FILTER_SIZE), index=True                 )
-    Id                    = Column(String(COORDS_ID_SIZE    ), index=True                 )
+    Pos                   = Column(Integer                    , index=True, nullable=False )
+    format_ID             = Column(Integer                    , index=True, nullable=False )
+    ref_ID                = Column(Integer                    , index=True, nullable=False )
+    alt_ID                = Column(Integer                    , index=True, nullable=False )
+    Qual                  = Column(Float                      , index=True, nullable=False )
+    Filter                = Column(String(COORDS_FILTER_SIZE) , index=True                 )
+    Id                    = Column(String(COORDS_ID_SIZE    ) , index=True                 )
 
-    chrompos_ID           = Column(Integer                   , index=True, nullable=False )
+    chrompos_ID           = Column(Integer                    , index=True, nullable=False )
     #chrompos_ID           = Column(Integer, ForeignKey('chrompos.chrompos_ID'), index=True, nullable=False )
     #chrompos_src          = relationship("ChromPos", backref=backref('data', order_by=Pos), cascade="all, delete")
 
-    info_AF1              = Column(Float  , index=True)
-    info_CI95_1           = Column(Float  , index=True)
-    info_CI95_2           = Column(Float  , index=True)
-    info_DP               = Column(Integer, index=True)
-    info_DP4_1            = Column(Integer, index=True)
-    info_DP4_2            = Column(Integer, index=True)
-    info_DP4_3            = Column(Integer, index=True)
-    info_DP4_4            = Column(Integer, index=True)
-    info_FQ               = Column(Integer, index=True)
-    info_MQ               = Column(Integer, index=True)
+    info_AF1              = Column(Float                      , index=True)
+    info_CI95_1           = Column(Float                      , index=True)
+    info_CI95_2           = Column(Float                      , index=True)
+    info_DP               = Column(Integer                    , index=True)
+    info_DP4_1            = Column(Integer                    , index=True)
+    info_DP4_2            = Column(Integer                    , index=True)
+    info_DP4_3            = Column(Integer                    , index=True)
+    info_DP4_4            = Column(Integer                    , index=True)
+    info_FQ               = Column(Integer                    , index=True)
+    info_MQ               = Column(Integer                    , index=True)
 
     meta_aaf_1            = Column(Float                      , index=True)
     meta_aaf_2            = Column(Float                      , index=True)
@@ -465,7 +464,7 @@ class Coords(Base):
     COORDS_EFF_MEDIUM_SIZE        =  128
 
     if SNPEFF:
-        print "SNP EFFECT DATABASE"
+        print "SNPEFF SUPPORT"
         eff_Effect            = Column( String(COORDS_EFF_EFF_SIZE   ), index=True )
         eff_Effect_Impact     = Column( String(COORDS_EFF_IMPACT_SIZE), index=True )
         eff_Functional_Class  = Column( String(COORDS_EFF_CLASS_SIZE ), index=True )
@@ -480,6 +479,8 @@ class Coords(Base):
         eff_GenotypeNum       = Column( String(COORDS_EFF_SMALL_SIZE ), index=True )
         eff_ERRORS            = Column( String(COORDS_EFF_SMALL_SIZE ), index=True )
         eff_WARNINGS          = Column( String(COORDS_EFF_SMALL_SIZE ), index=True )
+    else:
+        print "NO SNPEFF SUPPORT"
 
     def __repr__(self):
         return "<Coords(file_ID='%s', coord_ID='%s', format_ID='%s', chrom_ID='%s', ref_ID='%s', alt_ID='%s', Filter='%s', Id='%s', Pos='%d', Qual='%.3f')>" % \

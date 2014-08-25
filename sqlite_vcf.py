@@ -25,7 +25,7 @@ TODO:
 """
 
 SINGLE_THREADED = False
-NUM_THREADS     = 2
+NUM_THREADS     = 1
 
 #dumpevery       =  6400
 #debug           = dumpevery * 2 # -1 no; > 1 = delete database, number of samples to read
@@ -33,12 +33,14 @@ NUM_THREADS     = 2
 #dumpevery       = 5
 #debug           = dumpevery * 2 # -1 no; > 1 = delete database, number of samples to read
 
-dumpevery       = 300000
+dumpevery       = 100000
 debug           =    -1 # -1 no; > 1 = delete database, number of samples to read
 
 printevery      = dumpevery * 3
 
 sql_echo        = False
+
+
 
 ppp             = pprint.PrettyPrinter(indent=1)
 pp              = ppp.pprint
@@ -49,7 +51,7 @@ startTime       = time.time()
 
 eff_keys        = None
 
-
+processing      = False
 
 def main(args):
     print args
@@ -123,6 +125,10 @@ def main(args):
             if queue.empty():
                 #print "queue empty.", running, "running"
                 if running == 0:
+                    while processing:
+                        print "no running thread. waiting processing to finish"
+                        time.sleep(5)
+
                     print "no running thread. finished"
                     break
                 time.sleep(1)
@@ -205,6 +211,8 @@ def get_process_records_multi( q ):
 def process_records( db, session, infile, file_ID, metadata, records ):
     execute         = db.engine.execute
     ins             = Coords.__table__.insert()
+    global processing
+    processing      = True
 
     #pp( records )
 
@@ -288,6 +296,7 @@ def process_records( db, session, infile, file_ID, metadata, records ):
     session.flush()
 
     print infile, "COORD FINAL  ", coord_num
+    processing      = False
 
 
 def process_file_multi( q, infile ):
