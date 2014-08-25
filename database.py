@@ -23,6 +23,9 @@ from sqlalchemy.orm import relationship, backref
 
 print sqlalchemy.__version__
 
+SNPEFF = False
+SNPEFF =  True
+
 
 def main(args, echo=True):
     #dbname   = 'test.sqlite'
@@ -95,7 +98,7 @@ class loaddb(object):
         ccache = self.cache[ cls ]
         ckey   = frozenset(vals.items())
         res    = ccache.get( ckey, None )
-	#print ckey
+        #print ckey
 
         if res is None:
             #print "get_or_updates", ckey, 'NOT IN CACHE'
@@ -180,42 +183,24 @@ class loaddb(object):
 Base = declarative_base()
 
 
-CHROM_SIZE                    =  256
-FORMAT_COL_SIZE               =   32
+#CHROM_SIZE                    =  256
+#FORMAT_COL_SIZE               =   32
 #REF_SIZE                      = 2048
 #ALT_SIZE                      = 2048
-FILEPATH_SIZE                 = 1024
-FILEBASE_SIZE                 =  512
-FILENAME_SIZE                 =  256
+#FILEPATH_SIZE                 = 1024
+#FILEBASE_SIZE                 =  512
+#FILENAME_SIZE                 =  256
 
-HEADER_NAME_SIZE              =   32
-HEADER_VALUE_SIZE             =  512
-HEADER_FORMAT_NAME_SIZE       =   32
-HEADER_FORMAT_TYPE_SIZE       =   16
-HEADER_FORMAT_DESC_SIZE       =  256
-HEADER_INFO_NAME_SIZE         =   16
-HEADER_INFO_TYPE_SIZE         =   16
-HEADER_INFO_DESC_SIZE         =   64
-HEADER_META_NAME_SIZE         =   32
-HEADER_META_DESC_SIZE         =  512
-
-COORDS_FILTER_SIZE            =   16
-COORDS_ID_SIZE                =   64
-COORDS_INFO_NAME_SIZE         =   16
-COORDS_INFO_VALUE_SIZE        =   16
-COORDS_META_NAME_SIZE         =   16
-COORDS_META_VALUE_SIZE        =   16
-COORDS_SAMPLE_NAME_SIZE       =  256
-COORDS_SAMPLE_INFO_NAME_SIZE  =   16
-COORDS_SAMPLE_INFO_VALUE_SIZE =   64
-COORDS_REF_SIZE               =  256
-COORDS_ALT_SIZE               =  256
-COORDS_FILTER_SIZE            =   32
-COORDS_META_ALLELE            =  256
-COORDS_META_SUBTYPE           =  256
-COORDS_META_TYPE              =  256
-COORDS_SAMPLE_GT              =   16
-COORDS_SAMPLE_GT_BASES        =  256
+#HEADER_NAME_SIZE              =   32
+#HEADER_VALUE_SIZE             =  512
+#HEADER_FORMAT_NAME_SIZE       =   32
+#HEADER_FORMAT_TYPE_SIZE       =   16
+#HEADER_FORMAT_DESC_SIZE       =  256
+#HEADER_INFO_NAME_SIZE         =   16
+#HEADER_INFO_TYPE_SIZE         =   16
+#HEADER_INFO_DESC_SIZE         =   64
+#HEADER_META_NAME_SIZE         =   32
+#HEADER_META_DESC_SIZE         =  512
 
 
 
@@ -223,8 +208,10 @@ COORDS_SAMPLE_GT_BASES        =  256
 class Chroms(Base):
     __tablename__  = 'chrom'
     __table_args__ = {'sqlite_autoincrement': True}
-    chrom_ID       = Column(Integer, Sequence('chrom_id'), primary_key=True, autoincrement=True )
-    chrom_name     = Column(String , index=True, unique=True )
+    #chrom_ID       = Column(Integer, Sequence('chrom_id'), primary_key=True, autoincrement=True )
+    #chrom_name     = Column(String , index=True, unique=True )
+    chrom_ID       = Column(Integer, index=True, unique=True )
+    chrom_name     = Column(String , primary_key=True)
 
     def __repr__(self):
         return "<Chroms(chrom_ID='%s', chrom_name='%s')>" % ( str(self.chrom_ID), self.chrom_name )
@@ -232,8 +219,10 @@ class Chroms(Base):
 class Format_col(Base):
     __tablename__  = 'format_col'
     __table_args__ = {'sqlite_autoincrement': True}
-    format_ID      = Column(Integer, Sequence('format_col_id'), primary_key=True, autoincrement=True )
-    format_str     = Column(String , index=True, unique=True )
+    #format_ID      = Column(Integer, Sequence('format_col_id'), primary_key=True, autoincrement=True )
+    #format_str     = Column(String , index=True, unique=True )
+    format_ID      = Column(Integer, index=True, unique=True )
+    format_str     = Column(String , primary_key=True )
 
     def __repr__(self):
         return "<Format_col(format_ID='%s', format_str='%s')>" % ( str(self.format_ID), self.format_str )
@@ -241,8 +230,10 @@ class Format_col(Base):
 class Refs(Base):
     __tablename__  = 'refs'
     __table_args__ = {'sqlite_autoincrement': True}
-    ref_ID         = Column(Integer, Sequence('refs_id'), primary_key=True, autoincrement=True)
-    ref_str        = Column(String , index=True, unique=True )
+    #ref_ID         = Column(Integer, Sequence('refs_id'), primary_key=True, autoincrement=True)
+    #ref_str        = Column(String , index=True, unique=True )
+    ref_ID         = Column(Integer, index=True, unique=True )
+    ref_str        = Column(String , primary_key=True )
 
     def __repr__(self):
         return "<Refs(ref_ID='%s', ref_str='%s')>" % ( str(self.ref_ID), self.ref_str )
@@ -250,8 +241,10 @@ class Refs(Base):
 class Alts(Base):
     __tablename__  = 'alts'
     __table_args__ = {'sqlite_autoincrement': True}
-    alt_ID        = Column(Integer, Sequence('alts_id'), primary_key=True, autoincrement=True)
-    alt_str       = Column(String , index=True, unique=True )
+    #alt_ID        = Column(Integer, Sequence('alts_id'), primary_key=True, autoincrement=True)
+    #alt_str       = Column(String , index=True, unique=True )
+    alt_ID        = Column(Integer, index=True, unique=True )
+    alt_str       = Column(String , primary_key=True )
 
     def __repr__(self):
         return "<Alts(alts_ID='%s', alts_str='%s')>" % ( str(self.alt_ID), self.alt_str )
@@ -259,8 +252,10 @@ class Alts(Base):
 class VarType(Base):
     __tablename__   = 'types'
     __table_args__  = {'sqlite_autoincrement': True}
-    var_type_ID     = Column(Integer, Sequence('types_id'), primary_key=True, autoincrement=True)
-    var_type_str    = Column(String , index=True, unique=True )
+    #var_type_ID     = Column(Integer, Sequence('types_id'), primary_key=True, autoincrement=True)
+    #var_type_str    = Column(String , index=True, unique=True )
+    var_type_ID     = Column(Integer, index=True, unique=True )
+    var_type_str    = Column(String , primary_key=True)
 
     def __repr__(self):
         return "<VarType(var_type_ID='%s', var_type_str='%s')>" % ( str(self.var_type_ID), self.var_type_str )
@@ -268,8 +263,10 @@ class VarType(Base):
 class VarSubType(Base):
     __tablename__   = 'subtypes'
     __table_args__  = {'sqlite_autoincrement': True}
-    var_subtype_ID  = Column(Integer, Sequence('subtypes_id'), primary_key=True, autoincrement=True)
-    var_subtype_str = Column(String , index=True, unique=True )
+    #var_subtype_ID  = Column(Integer, Sequence('subtypes_id'), primary_key=True, autoincrement=True)
+    #var_subtype_str = Column(String , index=True, unique=True )
+    var_subtype_ID  = Column(Integer, index=True, unique=True )
+    var_subtype_str = Column(String , primary_key=True )
 
     def __repr__(self):
         return "<VarSubType(var_subtype_ID='%s', var_subtype_str='%s')>" % ( str(self.var_subtype_ID), self.var_subtype_str )
@@ -347,12 +344,12 @@ class Header_meta(Base):
 class ChromPos(Base):
     __tablename__         = 'chrompos'
     #__table_args__        = {'sqlite_autoincrement': True}
-    chrompos_ID           = Column(Integer                              , index=True, primary_key=True )
-    chrom_ID              = Column(Integer                              , index=True, nullable=False )
-    Pos                   = Column(Integer                              , index=True, nullable=False )
-#    chrompos_ID           = Column(Integer, Sequence('chrompos_id')                                 , primary_key=True, autoincrement=True )
-#    chrom_ID              = Column(Integer, ForeignKey('chrom.chrom_ID'), index=True, nullable=False )
-#    chrom_src             = relationship("Chroms", backref=backref('coords', order_by=Pos), cascade="all, delete")
+    Pos                   = Column(Integer                              , primary_key=True )
+    chrom_ID              = Column(Integer                              , primary_key=True )
+    #chrompos_ID           = Column(Integer, Sequence('chrompos_id')                                 , primary_key=True, autoincrement=True )
+    chrompos_ID           = Column(Integer                              , index=True, nullable=False )
+    #chrom_ID              = Column(Integer, ForeignKey('chrom.chrom_ID'), primary_key=True )
+    #chrom_src             = relationship("Chroms", backref=backref('coords', order_by=Pos), cascade="all, delete")
 
     def __repr__(self):
         return "<ChromPos(chrompos_ID='%s', chrom_ID='%s', Pos='%s')>" % \
@@ -361,6 +358,24 @@ class ChromPos(Base):
 class Coords(Base):
     __tablename__         = 'coords'
     #__table_args__        = {'sqlite_autoincrement': True}
+
+    COORDS_FILTER_SIZE            =   16
+    COORDS_ID_SIZE                =   64
+    COORDS_INFO_NAME_SIZE         =   16
+    COORDS_INFO_VALUE_SIZE        =   16
+    COORDS_META_NAME_SIZE         =   16
+    COORDS_META_VALUE_SIZE        =   16
+    COORDS_SAMPLE_NAME_SIZE       =  256
+    COORDS_SAMPLE_INFO_NAME_SIZE  =   16
+    COORDS_SAMPLE_INFO_VALUE_SIZE =   64
+    COORDS_REF_SIZE               =  256
+    COORDS_ALT_SIZE               =  256
+    COORDS_FILTER_SIZE            =   32
+    COORDS_META_ALLELE            =  256
+    COORDS_META_SUBTYPE           =  256
+    COORDS_META_TYPE              =  256
+    COORDS_SAMPLE_GT              =   16
+    COORDS_SAMPLE_GT_BASES        =  256
 
     #Chrom                 = Column(String(CHROM_SIZE        ), index=True, nullable=False )
     #Format                = Column(String(FORMAT_COL_SIZE   ), index=True, nullable=False )
@@ -382,8 +397,8 @@ class Coords(Base):
     Id                    = Column(String(COORDS_ID_SIZE    ), index=True                 )
 
     chrompos_ID           = Column(Integer                   , index=True, nullable=False )
-#    chrompos_ID           = Column(Integer, ForeignKey('chrompos.chrompos_ID'), index=True, nullable=False )
-#    chrompos_src          = relationship("ChromPos", backref=backref('data', order_by=Pos), cascade="all, delete")
+    #chrompos_ID           = Column(Integer, ForeignKey('chrompos.chrompos_ID'), index=True, nullable=False )
+    #chrompos_src          = relationship("ChromPos", backref=backref('data', order_by=Pos), cascade="all, delete")
 
     info_AF1              = Column(Float  , index=True)
     info_CI95_1           = Column(Float  , index=True)
@@ -422,28 +437,6 @@ class Coords(Base):
     #meta_var_type         = Column(String(COORDS_META_TYPE   ), index=True)
     meta_var_type         = Column(String(COORDS_META_TYPE   ), index=True)
 
-    # 'nfo': {'aaf': [1.0],
-    #         'alleles': ['A', 'G'],
-    #         'call_rate': 1.0,
-    #         'end': 3235,
-    #         'heterozygosity': 0.0,
-    #         'is_deletion': False,
-    #         'is_indel': False,
-    #         'is_monomorphic': False,
-    #         'is_snp': True,
-    #         'is_sv': False,
-    #         'is_sv_precise': False,
-    #         'is_transition': True,
-    #         'nucl_diversity': 0.0,
-    #         'num_called': 1,
-    #         'num_het': 0,
-    #         'num_hom_alt': 1,
-    #         'num_hom_ref': 0,
-    #         'num_unknown': 0,
-    #         'start': 3234,
-    #         'sv_end': None,
-    #         'var_subtype': 'ts',
-    #         'var_type': 'snp'},
     sample_1_called       = Column(Boolean                       )
     sample_1_DP           = Column(Integer                       )
     sample_1_GQ           = Column(Integer                       )
@@ -459,44 +452,39 @@ class Coords(Base):
     sample_1_is_variant   = Column(Boolean                       )
     sample_1_phased       = Column(Boolean                       )
     sample_1_name         = Column(Integer                       )
-    #         'samples': [{'called': True,
-    #                      'data': {'DP': 38,
-    #                               'GQ': 99,
-    #                               'GT': '1/1',
-    #                               'PL': [255, 114, 0]},
-    #                      'gt_alleles': ['1', '1'],
-    #                      'gt_bases': 'G/G',
-    #                      'gt_type': 2,
-    #                      'is_het': False,
-    #                      'is_variant': True,
-    #                      'phased': False,
-    #                      'sample': '/panfs/ANIMAL/group001/minjiumeng/tomato_reseq/SZAXPI008746-45'}],
-
-
-    #         'get_hom_refs': [],
-    #         'get_unknowns': [],
-    #         'get_hets': [],
-    #         'get_hom_alts': [{'called': True,
-    #                           'data': {'DP': 38,
-    #                                    'GQ': 99,
-    #                                    'GT': '1/1',
-    #                                    'PL': [255, 114, 0]},
-    #                           'gt_alleles': ['1', '1'],
-    #                           'gt_bases': 'G/G',
-    #                           'gt_type': 2,
-    #                           'is_het': False,
-    #                           'is_variant': True,
-    #                           'phased': False,
-    #                           'sample': '/panfs/ANIMAL/group001/minjiumeng/tomato_reseq/SZAXPI008746-45'}],
 
     #UniqueConstraint(file_ID, header_info_name)
     #ForeignKeyConstraint(['chrom_ID', 'file_ID'], ['chrom.chrom_ID', 'files.file_ID'])
+
+    COORDS_EFF_EFF_SIZE           =   64
+    COORDS_EFF_IMPACT_SIZE        =   64
+    COORDS_EFF_CLASS_SIZE         =   64
+    COORDS_EFF_CODON_SIZE         =   64
+    COORDS_EFF_GENE_SIZE          =   64
+    COORDS_EFF_SMALL_SIZE         =   64
+    COORDS_EFF_MEDIUM_SIZE        =  128
+
+    if SNPEFF:
+        print "SNP EFFECT DATABASE"
+        eff_Effect            = Column( String(COORDS_EFF_EFF_SIZE   ), index=True )
+        eff_Effect_Impact     = Column( String(COORDS_EFF_IMPACT_SIZE), index=True )
+        eff_Functional_Class  = Column( String(COORDS_EFF_CLASS_SIZE ), index=True )
+        eff_Codon_Change      = Column( String(COORDS_EFF_CODON_SIZE ), index=True )
+        eff_Amino_Acid_change = Column( String(COORDS_EFF_SMALL_SIZE ), index=True )
+        eff_Amino_Acid_length = Column( String(COORDS_EFF_SMALL_SIZE ), index=True )
+        eff_Gene_Name         = Column( String(COORDS_EFF_GENE_SIZE  ), index=True )
+        eff_Gene_BioType      = Column( String(COORDS_EFF_SMALL_SIZE ), index=True )
+        eff_Coding            = Column( String(COORDS_EFF_SMALL_SIZE ), index=True )
+        eff_Transcript        = Column( String(COORDS_EFF_MEDIUM_SIZE), index=True )
+        eff_Exon              = Column( String(COORDS_EFF_MEDIUM_SIZE), index=True )
+        eff_GenotypeNum       = Column( String(COORDS_EFF_SMALL_SIZE ), index=True )
+        eff_ERRORS            = Column( String(COORDS_EFF_SMALL_SIZE ), index=True )
+        eff_WARNINGS          = Column( String(COORDS_EFF_SMALL_SIZE ), index=True )
 
     def __repr__(self):
         return "<Coords(file_ID='%s', coord_ID='%s', format_ID='%s', chrom_ID='%s', ref_ID='%s', alt_ID='%s', Filter='%s', Id='%s', Pos='%d', Qual='%.3f')>" % \
         (str(self.file_ID), str(self.coord_ID), str(self.format_ID), str(self.chrom_ID), str(self.ref_ID), str(self.alt_ID), \
          str(self.Filter) , str(self.Id)      , self.Pos           , self.Qual)
-
 
 dbs = (Chroms, Format_col, Refs, Alts, Files, Header, Header_format, Header_info, Header_meta, Coords)
 
@@ -516,4 +504,3 @@ coordReg
 session.add( coord )
 session.commit()
 """
-

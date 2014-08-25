@@ -1,19 +1,15 @@
 #!/usr/bin/python
-#http://api.mongodb.org/python/current/tutorial.html
 import sys
 import os
 import pprint
-from itertools import izip
-#import json
-#import urllib
 import argparse
 import time
+import copy
+
+from multiprocessing        import Pool, Manager
+#from multiprocessing.queues import SimpleQueue
+from itertools import izip
 from collections import OrderedDict, defaultdict
-#from pymongo       import MongoClient
-#from pymongo       import ASCENDING, DESCENDING
-#from pymongo       import errors
-#from bson.objectid import ObjectId
-#from bson          import json_util
 
 import vcf
 
@@ -22,17 +18,38 @@ import datetime
 sys.path.insert(0, '.')
 from database import *
 
-ppp = pprint.PrettyPrinter(indent=1)
-pp  = ppp.pprint
+"""
+TODO:
+	update index variables from database
+	add snpeff
+"""
+
+SINGLE_THREADED = False
+NUM_THREADS     = 2
+
+#dumpevery       =  6400
+#debug           = dumpevery * 2 # -1 no; > 1 = delete database, number of samples to read
+
+#dumpevery       = 5
+#debug           = dumpevery * 2 # -1 no; > 1 = delete database, number of samples to read
+
+dumpevery       = 300000
+debug           =    -1 # -1 no; > 1 = delete database, number of samples to read
+
+printevery      = dumpevery * 3
 
 sql_echo        = False
 
-#MAX UPDATE: 5 * 430 = 2150 RECS/S 10 * 230 = 2300 RECS/S
-#MAX INSERT: 5 * 500 = 2500 RECS/S 10 * 300 = 3000 RECS/S
-#./mongo_vcf.py db_del -s localhost -p 27017 -d vcf -y; ./mongo_vcf.py db_add -s localhost -p 27017 -d vcf ; ./mongo_vcf.py file_add -s localhost -p 27017 -d vcf RF_001_SZAXPI008746-45.vcf.gz.snpeff.vcf
-#./mongo_vcf.py db_del -s localhost -p 27017 -d vcf -y; ./mongo_vcf.py db_add -s localhost -p 27017 -d vcf ; find data/ -name '*.vcf' | sort | xargs -P2 -n1 ./mongo_vcf.py file_add -s localhost -p 27017 -d vcf
+ppp             = pprint.PrettyPrinter(indent=1)
+pp              = ppp.pprint
 
-coord_num = 0
+coord_num       = 0
+
+startTime       = time.time()
+
+eff_keys        = None
+
+
 
 def main(args):
     print args
@@ -44,47 +61,246 @@ def main(args):
     indexes        = db.list_indexes( table_name='coords' )
     db.drop_indexes(table_name='coords')
 
-    metadata = defaultdict(dict)
-    print infiles
-    for infile in infiles:
-        process_file( db, infile, metadata )
 
-    process_metadata( db, metadata )
+    file_IDs        = {}
+    session         = db.get_session()
+    metadata        = defaultdict(dict)
+
+    print infiles
+
+    for infile in infiles:
+        print "processing file header", infile
+        infile_abs_path    = os.path.abspath(  infile )
+        infile_basename    = os.path.basename( infile )
+        fileReg            = Files(file_path=infile_abs_path, file_base=infile_basename, file_name=infile)
+
+        ifhd               = open(infile, 'r')
+        vcf_reader         = vcf.Reader(ifhd)
+
+        add_header( session, vcf_reader, fileReg )
+
+        file_IDs[ infile ] = fileReg.file_ID
+
+        del vcf_reader
+        ifhd.close()
+
+
+    if not SINGLE_THREADED:
+        pool    = Pool( processes=NUM_THREADS )
+        manager = Manager()
+        queue   = manager.Queue()
+        procs   = []
+
+        for infile in infiles:
+            print "adding thread to", infile
+            proc    = pool.apply_async(process_file_multi, (queue, infile))
+            procs.append( [ infile, proc ] )
+
+        pool.close()
+
+
+        while True:
+            running = 0
+            for procnum in xrange(len(procs)):
+                infile, proc = procs[procnum]
+                if proc:
+                    running += 1
+                    if proc.ready():
+                        if proc.successful():
+                            print "process %s has finished" % infile
+                            r = proc.get()
+                            print "res", r
+                            procs[ procnum ][ 1 ] = None
+
+                            process_q( queue, db, session, metadata, file_IDs, infile, running )
+                        else:
+                            print "error processing file", infile
+                            r = proc.get()
+                            print "res", r
+                            pool.terminate()
+                            sys.exit(1)
+
+            if queue.empty():
+                #print "queue empty.", running, "running"
+                if running == 0:
+                    print "no running thread. finished"
+                    break
+                time.sleep(1)
+
+            else:
+                process_q( queue, db, session, metadata, file_IDs, infile, running )
+
+    else:
+        processor = get_process_records_single(db, session, file_IDs, metadata)
+        for infile in infiles:
+            process_file( infile, processor )
+
+    process_metadata( db, session, metadata )
 
     print "adding indexes"
     db.add_indexes(indexes, 'coords')
     print "finished"
 
 
-def diffTime( runid, chrom, startTime, startTimeChrom, startTimeLap, regs, regsChrom, regsLap ):
+def process_q( queue, db, session, metadata, file_IDs, infile, running ):
+    print "queue not empty.", running, "still running.", NUM_THREADS, 'threads.', queue.qsize(),"in queue. whiling"
+    while not queue.empty():
+        print "queue not empty.", running, "still running.", NUM_THREADS, 'threads.', queue.qsize(),"in queue"
+        infile, data = queue.get_nowait()
+        print "got data from file", infile
+        file_ID      = file_IDs[ infile ]
+        #pp( data )
+        process_records( db, session, infile, file_ID, metadata, data )
+        time.sleep(0.5)
+
+
+def diffTime( runid, chrom, startTimeFile, startTimeChrom, startTimeLap, regs, regsChrom, regsLap ):
     currTime       = time.time()
 
     diffTimeStart  = currTime - startTime
+    diffTimeFile   = currTime - startTimeFile
     diffTimeChrom  = currTime - startTimeChrom
     diffTimeLap    = currTime - startTimeLap
 
-    diffRegsStart  = float( regs      )
-    diffRegsChrom  = float( regsChrom )
-    diffRegsLap    = float( regsLap   )
+    diffRegsStart  = coord_num
+    diffRegsFile   = regs
+    diffRegsChrom  = regsChrom
+    diffRegsLap    = regsLap
 
     speedStart     = diffRegsStart  / diffTimeStart
+    speedFile      = diffRegsFile   / diffTimeFile
     speedChrom     = diffRegsChrom  / diffTimeChrom
     speedLap       = diffRegsLap    / diffTimeLap
 
     print "\
-%s :: Time   : Start %7ds      Chrom %s %7ds      Lap %7ds\n\
-%s :: Records: Start %7d       Chrom %s %7d       Lap %7d\n\
-%s :: Speed  : Start %7.1f rec/s Chrom %s %7.1f rec/s Lap %7.1f rec/s\n\n" % (  runid, diffTimeStart, chrom, diffTimeChrom, diffTimeLap,
-                                                                                runid, diffRegsStart, chrom, diffRegsChrom, diffRegsLap,
-                                                                                runid, speedStart   , chrom, speedChrom   , speedLap )
-    #sys.stdout.flush()
+%s :: Time   : Start %7ds  File %7ds      Chrom %s %7ds      Lap %7ds\n\
+%s :: Records: Start %7d   File %7d       Chrom %s %7d       Lap %7d\n\
+%s :: Speed  : Start %7d   File %7d rec/s Chrom %s %7d rec/s Lap %7d rec/s\n\n" % (  \
+        runid, diffTimeStart, diffTimeFile, chrom, diffTimeChrom, diffTimeLap,
+        runid, diffRegsStart, diffRegsFile, chrom, diffRegsChrom, diffRegsLap,
+        runid, speedStart   , speedFile   , chrom, speedChrom   , speedLap )
 
 
-def process_metadata( db, metadata ):
+def get_process_records_single( db, session, file_IDs, metadata ):
+    def processor(infile, data):
+        process_records(db, session, infile, file_IDs[infile], metadata, data)
+
+    return processor
+
+
+def get_process_records_multi( q ):
+    def processor(infile, data):
+        try:
+            q.put_nowait( ( infile, data ) )
+        except Exception as inst:
+            print "ERROR PUTTING TO QUEUE"
+            print type(inst)     # the exception instance
+            print inst.args      # arguments stored in .args
+            print inst           # __str__ allows args to be printed directly
+            raise
+
+    return processor
+
+
+def process_records( db, session, infile, file_ID, metadata, records ):
+    execute         = db.engine.execute
+    ins             = Coords.__table__.insert()
+
+    #pp( records )
+
+    chromposes      = metadata['chromposes']
+    formats         = metadata['formats'   ]
+    refs            = metadata['refs'      ]
+    alts            = metadata['alts'      ]
+    types           = metadata['types'     ]
+    subtypes        = metadata['subtypes'  ]
+    chroms          = metadata['chroms'    ]
+    get_or_update   = db.get_or_update
+
+    global coord_num
+    print infile, "COORD INITIAL", coord_num, 'appending', len(records)
+
+    for data in records:
+        coord_num     += 1
+
+        pos            = data['Pos']
+        chrom_k        = ( ('chrom_name'       , data['chrom_ID']), )
+        chrom_ID       = chroms.get(     chrom_k      , -1 )
+
+        if chrom_ID == -1:
+            chrom_ID          = len( chroms ) + 1
+            chroms[ chrom_k ] = chrom_ID
+
+        chrompos_k     = ( ('chrom_ID'       , chrom_ID                ), ('Pos', pos) )
+        format_k       = ( ('format_str'     , data['format_ID'       ]), )
+        ref_k          = ( ('ref_str'        , data['ref_ID'          ]), )
+        alt_k          = ( ('alt_str'        , data['alt_ID'          ]), )
+        var_type_k     = ( ('var_type_str'   , data['meta_var_type'   ]), )
+        var_subtype_k  = ( ('var_subtype_str', data['meta_var_subtype']), )
+
+        chrompos_ID    = chromposes.get( chrompos_k   , -1 )
+        format_ID      = formats.get(    format_k     , -1 )
+        ref_ID         = refs.get(       ref_k        , -1 )
+        alt_ID         = alts.get(       alt_k        , -1 )
+        var_type_ID    = types.get(      var_type_k   , -1 )
+        var_subtype_ID = subtypes.get(   var_subtype_k, -1 )
+
+        if chrompos_ID    == -1:
+            chrompos_ID              = len( chromposes ) + 1
+            chromposes[ chrompos_k ] = chrompos_ID
+
+        if format_ID      == -1:
+            format_ID                = len( formats ) + 1
+            formats[ format_k ]      = format_ID
+
+        if ref_ID         == -1:
+            ref_ID        = len( refs ) + 1
+            refs[ ref_k ] = ref_ID
+
+        if alt_ID         == -1:
+            alt_ID        = len( alts ) + 1
+            alts[ alt_k ] = alt_ID
+
+        if var_type_ID    == -1:
+            var_type_ID         = len( types ) + 1
+            types[ var_type_k ] = var_type_ID
+
+        if var_subtype_ID == -1:
+            var_subtype_ID            = len( subtypes ) + 1
+            subtypes[ var_subtype_k ] = var_subtype_ID
+
+        data['coord_ID'        ] = coord_num
+        data['file_ID'         ] = file_ID
+        data['chrom_ID'        ] = chrom_ID
+        data['format_ID'       ] = format_ID
+        data['ref_ID'          ] = ref_ID
+        data['alt_ID'          ] = alt_ID
+        data['chrompos_ID'     ] = chrompos_ID
+        data['meta_var_type'   ] = var_type_ID
+        data['meta_var_subtype'] = var_subtype_ID
+
+    execute(
+        ins,
+        records
+    )
+
+    session.commit()
+    session.flush()
+
+    print infile, "COORD FINAL  ", coord_num
+
+
+def process_file_multi( q, infile ):
+    processor = get_process_records_multi(q)
+    process_file( infile, processor )
+
+
+def process_metadata( db, session, metadata ):
     execute         = db.engine.execute
 
     tables = (
-        ( 'chromposes', 'chromposes_ID' , ChromPos   ),
+        ( 'chroms'    , 'chrom_ID'      , Chroms     ),
+        ( 'chromposes', 'chrompos_ID'   , ChromPos   ),
         ( 'formats'   , 'format_ID'     , Format_col ),
         ( 'refs'      , 'ref_ID'        , Refs       ),
         ( 'alts'      , 'alt_ID'        , Alts       ),
@@ -113,10 +329,12 @@ def process_metadata( db, metadata ):
 
         print "INSERTING", table_name
         execute( ins, registers )
-        print "INSERTED", table_name
+        print "INSERTED ", table_name
+    session.commit()
+    session.flush()
 
 
-def add_header(session, vcf_reader, fileReg):
+def add_header( session, vcf_reader, fileReg ):
     headers = {
                 'header'  : [],
                 'formats' : [],
@@ -161,6 +379,7 @@ def add_header(session, vcf_reader, fileReg):
 
 
 
+
         if header_type == 'string':
             #print "  ADDING STRING"
             header = None
@@ -180,7 +399,6 @@ def add_header(session, vcf_reader, fileReg):
                 #print "    APPENDED"
 
 
-
         elif header_type == 'list':
             #print "  ADDING LIST"
             for el in header_val:
@@ -188,7 +406,6 @@ def add_header(session, vcf_reader, fileReg):
                 header = Header(header_name=header_key, header_value=el)
                 headers['header'].append( header )
                 #print "    APPENDED"
-
 
 
         elif header_type == 'dict':
@@ -205,29 +422,29 @@ def add_header(session, vcf_reader, fileReg):
 
                 elif header_key == 'infos':
                     ## fix snpeff
-                    #if 'EFF' in infos:
-                    #    #print infos
-                    #
-                    #    for k in infos.keys():
-                    #        #print k, infos[k]
-                    #        #print 'DICT', infos[k].__dict__
-                    #        #print 'ASDICT', infos[k]._asdict()
-                    #        #, dir(infos[k])
-                    #        infos[k] = dict( infos[k]._asdict() )
-                    #
-                    #    #print 'INFOS', infos
-                    #    #print 'INFOS EFF', infos['EFF']
-                    #    #print 'INFOS EFF DESC', infos['EFF']['desc']
-                    #
-                    #    #infos['EFF']['desc'] = [ x.replace('[', '').replace(']', '').replace(')', '').replace('(', '|').strip().split( '|' ) for x in infos['EFF']['desc'] ]
-                    #    Spos = infos['EFF']['desc'].find('Format: ')
-                    #    if Spos != -1:
-                    #        Spos += 8
-                    #        infos['EFF']['format'] = infos['EFF']['desc'][Spos:]
-                    #        infos['EFF']['format'] = infos['EFF']['format'].replace('[', '').replace(']', '').replace(')', '').replace('\'', '').replace('(', '|').split( '|' )
-                    #        infos['EFF']['format'] = [ x.strip() for x in infos['EFF']['format'] ]
-                    #        #print 'INFOS EFF FORMAT', infos['EFF']['format']
+                    if el_name == 'EFF':
+                        global eff_keys
+                        #print 'EFF', el_val._asdict()
+                        vals     = el_val._asdict()
+                        desc     = vals['desc']
+                        desc     = desc[desc.find("'")+1:].replace("'", "")
+                        #print 'DESC', desc
+                        desc     = desc.replace('[', '').replace(']', '').replace(')', '').replace('(', '|').strip().split( '|' )
+                        desc     = [ x.strip() for x in desc ]
+                        #print 'DESC LIST', desc
+                        eff_keys = desc
+                        #for k in eff_keys:
+                        #    print 'EFF K', k, 'VAL', eff_keys[k]
 
+                        ##infos['EFF']['desc'] = [ x. for x in infos['EFF']['desc'] ]
+                        #Spos = eff_keys['EFF']['desc'].find('Format: ')
+                        #if Spos != -1:
+                        #    Spos += 8
+                        #    eff_keys['EFF']['format'] = eff_keys['EFF']['desc'][Spos:]
+                        #    eff_keys['EFF']['format'] = eff_keys['EFF']['format'].replace('[', '').replace(']', '').replace(')', '').replace('\'', '').replace('(', '|').split( '|' )
+                        #    eff_keys['EFF']['format'] = [ x.strip() for x in eff_keys['EFF']['format'] ]
+                        #    #print 'INFOS EFF FORMAT', infos['EFF']['format']
+                        #print eff_keys
 
                     header_info = Header_info(header_info_name=el_name, header_info_num=el_val[1], header_info_type=el_val[2], header_info_desc=el_val[3])
                     headers['infos'].append( header_info )
@@ -272,55 +489,38 @@ def add_header(session, vcf_reader, fileReg):
     session.flush()
 
 
-def process_file( db, infile, metadata ):
+def parseval( val ):
+    if repr(type(val)) == "<type 'list'>":
+        res = []
+        for e in val:
+            #print e, type(e)
+            res.append( str(e) )
+        return res
+    else:
+        return val
+
+
+def process_file( infile, saver ):
     print "processing", infile
+    sys.stdin.close()
+
+    if not os.path.exists( infile ):
+        print "input file %s does not exists" % infile
+        sys.exit(1)
 
     colnames        = ('CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT' )
 
-    printevery      =  6400
-    dumpevery       =  6400
-    debug           = dumpevery * 6 # -1 no; > 1 = delete database, number of samples to read
+    try:
+        infile_fhd      = open(infile, 'r')
+    except:
+        print '!'*50
+        print "ERROR OPENING FILE", infile
+        print '!'*50
+        raise
 
-    #printevery      =  5
-    #dumpevery       =  5
-    #debug           = dumpevery * 6 # -1 no; > 1 = delete database, number of samples to read
-
-    #printevery      = 19200
-    #dumpevery       =  6400
-    #debug           =    -1 # -1 no; > 1 = delete database, number of samples to read
-
-
-    def parseval( val ):
-        if repr(type(val)) == "<type 'list'>":
-            res = []
-            for e in val:
-                #print e, type(e)
-                res.append( str(e) )
-            return res
-        else:
-            return val
-
-
-    global coord_num
-
-
-    infile_abs_path = os.path.abspath(  infile )
-    infile_basename = os.path.basename( infile )
-
-    vcf_reader      = vcf.Reader(open(infile, 'r'))
-
-    session         = db.get_session()
-
-    fileReg         = Files(file_path=infile_abs_path, file_base=infile_basename, file_name=infile)
-    session.add( fileReg )
-    session.commit()
-    session.flush()
-
-    #add_header( session, vcf_reader, fileReg )
+    vcf_reader      = vcf.Reader( infile_fhd )
 
     samples_names   = getattr(vcf_reader, 'samples', [])
-
-    file_ID         = fileReg.file_ID
 
     lastChrom       = None
     lastChromUrl    = None
@@ -328,25 +528,13 @@ def process_file( db, infile, metadata ):
     regs            = 0
     regsChrom       = 0
     regsLap         = 0
-    startTime       = time.time()
-    startTimeChrom  = startTime
-    startTimeLap    = startTime
+    startTimeFile   = time.time()
+    startTimeChrom  = startTimeFile
+    startTimeLap    = startTimeFile
     records         = [None] * dumpevery
-    chrom_ID        = -1
-    chromposes      = metadata['chromposes']
-    formats         = metadata['formats'   ]
-    refs            = metadata['refs'      ]
-    alts            = metadata['alts'      ]
-    types           = metadata['types'     ]
-    subtypes        = metadata['subtypes'  ]
-    get_or_update   = db.get_or_update
-    execute         = db.engine.execute
-    ins             = Coords.__table__.insert()
-
 
     for record in vcf_reader:
         #print pp.pprint( record )
-        coord_num += 1
         regs      += 1
         regsChrom += 1
         regsLap   += 1
@@ -363,82 +551,13 @@ def process_file( db, infile, metadata ):
         chrom = rec[ 'CHROM' ]
         pos   = rec[ 'POS'   ]
 
-
-
-
-        #fix SNPeff
-        if 'INFO' in rec and 'EFF' in rec['INFO']:
-            #print "INFO EFF B", rec['INFO']['EFF']
-            rec['INFO']['EFF'] = [ x.replace(')', '').replace('(', '|').strip().split( '|' ) for x in rec['INFO']['EFF'] ]
-            #print "INFO EFF A", rec['INFO']['EFF']
-
-
-
-
-        if lastChrom != chrom:
-            #diffTime( infile, chrom, startTime, startTimeChrom, startTimeLap, regs, regsChrom, regsLap )
-            startTimeLap   = time.time()
-            startTimeChrom = startTimeLap
-
-            lastChrom      = chrom
-            regsChrom      = 0
-            regsLap        = 0
-
-            db_chrom       = get_or_update( Chroms    , { 'chrom_name': chrom } )
-            chrom_ID       = db_chrom.chrom_ID
-
-            print infile, chrom, chrom_ID, db_chrom, "\n\n"
-
         #pp(rec)
-
-
 
         alt_str        = ','.join(rec['ALT'   ])
 
-        chrompos_k     = ( ('chrom_ID'       , chrom_ID          ), ('Pos', pos) )
-        format_k       = ( ('format_str'     , rec['FORMAT']     ), )
-        ref_k          = ( ('ref_str'        , rec['REF']        ), )
-        alt_k          = ( ('alt_str'        , alt_str           ), )
-        var_type_k     = ( ('var_type_str'   , record.var_type   ), )
-        var_subtype_k  = ( ('var_subtype_str', record.var_subtype), )
-
-        chrompos_ID    = chromposes.get( chrompos_k   , -1 )
-        format_ID      = formats.get(    format_k     , -1 )
-        ref_ID         = refs.get(       ref_k        , -1 )
-        alt_ID         = alts.get(       alt_k        , -1 )
-        var_type_ID    = types.get(      var_type_k   , -1 )
-        var_subtype_ID = subtypes.get(   var_subtype_k, -1 )
-
-
-        if chrompos_ID == -1:
-            chrompos_ID              = len( chromposes )
-            chromposes[ chrompos_k ] = chrompos_ID
-
-        if format_ID == -1:
-            format_ID           = len( formats )
-            formats[ format_k ] = format_ID
-
-        if ref_ID == -1:
-            ref_ID        = len( refs )
-            refs[ ref_k ] = ref_ID
-
-        if alt_ID == -1:
-            alt_ID        = len( alts )
-            alts[ alt_k ] = alt_ID
-
-        if var_type_ID == -1:
-            var_type_ID         = len( types )
-            types[ var_type_k ] = var_type_ID
-
-        if var_subtype_ID == -1:
-            var_subtype_ID            = len( subtypes )
-            subtypes[ var_subtype_k ] = var_subtype_ID
-
-
-
         rec_samples   = []
         for sample in record.samples:
-            re = {
+            res = {
                 'called'    : sample.called,     # True if the GT is not ./.
                 'gt_alleles': sample.gt_alleles, # The numbers of the alleles called at a given sample
                 'gt_bases'  : sample.gt_bases,   # The actual genotype alleles. E.g. if VCF genotype is 0/1, return A/G
@@ -450,11 +569,11 @@ def process_file( db, infile, metadata ):
                 #'site'      : sample.site,       # The _Record for this _Call
             }
 
-            re_data = {} # Dictionary of data from the VCF file
+            res_data = {} # Dictionary of data from the VCF file
             for field in sample.data._fields:
-                re_data[ field ] = getattr(sample.data, field)
-            re['data'] = re_data
-            rec_samples.append( re )
+                res_data[ field ] = getattr(sample.data, field)
+            res['data'] = res_data
+            rec_samples.append( res )
 
 
         rec_samples_0 = rec_samples[0]
@@ -467,13 +586,24 @@ def process_file( db, infile, metadata ):
 
 
         data = {
-            'coord_ID'              : coord_num,
-            'file_ID'               : file_ID,
-            'chrom_ID'              : chrom_ID,
-            'format_ID'             : format_ID,
-            'ref_ID'                : ref_ID,
-            'alt_ID'                : alt_ID,
-            'chrompos_ID'           : chrompos_ID,
+            #'coord_ID'              : coord_num,
+            #'file_ID'               : file_ID,
+            #'chrom_ID'              : chrom_ID,
+            #'format_ID'             : format_ID,
+            #'ref_ID'                : ref_ID,
+            #'alt_ID'                : alt_ID,
+            #'chrompos_ID'           : chrompos_ID,
+
+            'coord_ID'              : None,
+            'file_ID'               : None,
+            'chrom_ID'              : rec['CHROM'],
+            'format_ID'             : rec['FORMAT'],
+            'ref_ID'                : rec['REF'],
+            'alt_ID'                : alt_str,
+            'chrompos_ID'           : None,
+            'meta_var_type'         : record.var_type,
+            'meta_var_subtype'      : record.var_subtype,
+
             'Pos'                   : rec['POS'   ],
             'Qual'                  : rec['QUAL'  ],
             'Filter'                : rec['FILTER'],
@@ -508,8 +638,6 @@ def process_file( db, infile, metadata ):
             'meta_num_unknown'      : record.num_unknown,
             'meta_start'            : record.start,
             'meta_sv_end'           : record.sv_end,
-            'meta_var_type'         : var_type_ID,
-            'meta_var_subtype'      : var_subtype_ID,
             'sample_1_called'       : rec_samples_0['called'],
             'sample_1_DP'           : rec_samples_0['data']['DP'],
             'sample_1_GQ'           : rec_samples_0['data']['GQ'],
@@ -524,57 +652,100 @@ def process_file( db, infile, metadata ):
             'sample_1_is_variant'   : rec_samples_0['is_variant'],
             'sample_1_phased'       : rec_samples_0['phased'],
             'sample_1_name'         : samples_names.index( rec_samples_0['sample'] ),
+
+            "eff_Effect"            : None,
+            "eff_Effect_Impact"     : None,
+            "eff_Functional_Class"  : None,
+            "eff_Codon_Change"      : None,
+            "eff_Amino_Acid_change" : None,
+            "eff_Amino_Acid_length" : None,
+            "eff_Gene_Name"         : None,
+            "eff_Gene_BioType"      : None,
+            "eff_Coding"            : None,
+            "eff_Transcript"        : None,
+            "eff_Exon"              : None,
+            "eff_GenotypeNum"       : None,
+            "eff_ERRORS"            : None,
+            "eff_WARNINGS"          : None
         }
 
+        #fix SNPeff
+        if 'EFF' in rec_info:
+            eff_data = rec_info['EFF'][0]
+            #print "INFO EFF B", eff_data
+            eff_data = eff_data.replace(')', '').replace('(', '|').split( '|' )
+            eff_data = [ x.strip() for x in eff_data ]
+            #print "INFO EFF A", eff_data
+            #print len(eff_data), len(eff_keys)
+            #print eff_data
+            #print eff_keys
+
+            if len(eff_data) != len(eff_keys):
+                if len(eff_data) == (len(eff_keys)-2):
+                    eff_data += ['', '']
+                    #print "INFO EFF C", effdata
+                elif len(eff_data) == (len(eff_keys)-1):
+                    eff_data += ['']
+                else:
+                    print "NUMBER OF SNPEFF ROWS != NUMBER OF SNPEFF TITLES", len(eff_data), len(eff_keys)
+                    print eff_data
+                    print eff_keys
+                    regs -= 1
+                    continue
+                    #sys.exit(1)
+
+            for e in xrange(len(eff_keys)):
+                ek = 'eff_' + eff_keys[e]
+                ev =          eff_data[e]
+                #print ek
+                data[ ek ] = ev
+
+
+        #pp( data )
 
 
         pos            = ((regs-1) % dumpevery)
         records[ pos ] = data
 
-
+        if pos == (dumpevery - 1):
+            #http://stackoverflow.com/questions/11769366/why-is-sqlalchemy-insert-with-sqlite-25-times-slower-than-using-sqlite3-directly
+            print "processing", infile, "pos", pos, 'data', len( records ), 'sending'
+            try:
+                saver( infile, records )
+            except Exception as inst:
+                print "ERROR SENDING TO SAVER"
+                print type(inst)     # the exception instance
+                print inst.args      # arguments stored in .args
+                print inst           # __str__ allows args to be printed directly
+                raise
+            print "processing", infile, "pos", pos, 'data', len( records ), 'sent'
 
         if (debug > 0 and debug <= 4 ) or ( debug > 5 and regs % (debug/5) == 0 ) or ( debug < 0 and regs % printevery == 0 ):
-            #sys.stdout.write( str( pos ) + " " )
-            diffTime( infile, chrom, startTime, startTimeChrom, startTimeLap, regs, regsChrom, regsLap )
+            diffTime( infile, chrom, startTimeFile, startTimeChrom, startTimeLap, regs, regsChrom, regsLap )
             regsLap      = 0
             startTimeLap = time.time()
 
 
 
-
-        if pos == (dumpevery - 1):
-            #print "DUMPING"
-            #http://stackoverflow.com/questions/11769366/why-is-sqlalchemy-insert-with-sqlite-25-times-slower-than-using-sqlite3-directly
-            #engine.execute(
-            #    Customer.__table__.insert(),
-            #    [{"name":'NAME ' + str(i)} for i in range(n)]
-            #)
-
-            execute(
-                ins,
-                records
-            )
-            #records = [None] * dumpevery
-
-
-    print coord_num
-
-    diffTime( infile, chrom, startTime, startTimeChrom, startTimeLap, regs, regsChrom, regsLap )
-
-    return
     pos = (regs-1) % dumpevery
     if regs % dumpevery != 0:
         data = records[:pos+1]
-        print "last pos", pos, 'data', len(data   )
-        execute(
-            ins,
-            data
-        )
-        del data
-    else:
-        print "no remaining"
+        print "processing", infile, "pos", pos, 'data', len( data ), 'LAST. sending'
+        try:
+            saver( infile, data )
+        except Exception as inst:
+            print "ERROR SENDING TO SAVER LAST"
+            print type(inst)     # the exception instance
+            print inst.args      # arguments stored in .args
+            print inst           # __str__ allows args to be printed directly
+            raise
+        print "processing", infile, "pos", pos, 'data', len( data ), 'LAST. sent'
 
-    del records
+    else:
+        print "processing", infile, "no remaining"
+
+    diffTime( infile, chrom, startTimeFile, startTimeChrom, startTimeLap, regs, regsChrom, regsLap )
+    print "processing", infile, "no remaining", 'RETURNING'
 
 
         #rec_meta = {
