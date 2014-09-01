@@ -28,7 +28,7 @@ ENV DEBIAN_PRIORITY    critical
 ENV DEBCONF_NOWARNINGS yes
 
 RUN	apt-get update; \
-	apt-get install -y python-setuptools build-essential git python-dev libmysqlclient-dev; \
+	apt-get install -y python-setuptools build-essential git python-dev libmysqlclient-dev sqlite; \
 	apt-get clean all
 
 ENV PYTHON_EGG_DIR /tmp

@@ -20,6 +20,19 @@ import database
 #time find data/ -name 'RF_*.vcf.gz' | xargs -I{} -r -P20 bash -c "VCF={}; bn=\`basename {}\`; of=db/\$bn.data.sqlite; pf=db/\$bn.index.sqlite; rm -f $of; rm -f $pf; number=\$RANDOM; RANGE=30; let 'number %= $RANGE'; sleep \$number; echo \$VCF \$of \$pf \$number; docker run -i -t --rm -v \$PWD/data/:/data:rw -v \$PWD/db:/db sauloal/vcflite pypy db/sqlite_vcf.py -ri -rm -d \$of -i \$pf \$VCF"
 #run -i -t --rm -v $PWD/data/:/data:rw -v $PWD/db:/db sauloal/vcflite pypy db/sqlite_vcf.py -MERGE -ri -rm -d db/merged.sqlite db/RF_00*data.sqlite
 
+#84 w/ index
+#real    204m18.846s
+#user    0m3.371s
+#sys     0m2.274s
+
+
+#ADD 3h
+#84h 14min
+#real    1094m9.772s
+#user    0m0.849s
+#sys     0m0.280s
+
+
 sql_echo        = True
 sql_echo        = False
 

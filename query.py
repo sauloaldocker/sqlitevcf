@@ -18,7 +18,7 @@ IPAD=os.environ.get( 'SQLITE_PORT_5000_TCP_ADDR', '127.0.0.1' )
 
 
 queries = [
-	[ 'chrom', dict(results_per_page=15), [dict(name='chrom_name', op='like', val='SL2.40%')], [] ]
+	[ 'coords', dict(results_per_page=15), [dict(name='Chrom', op='==', val='SL2.40ch00'), dict(name='Pos', op='==', val='3235')], [] ]
 ]
 
 
